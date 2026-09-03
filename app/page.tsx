@@ -8,28 +8,52 @@ import EcoPulseSection from "@/components/EcoPulseSection";
 import NatureSnapsSection from "@/components/NatureSnapsSection";
 import MembershipSection from "@/components/MembershipSection";
 import SupportSection from "@/components/SupportSection";
+import { db } from "@/lib/firebase";
 import { 
-  Trees, 
+  collection, 
+  query, 
+  orderBy, 
+  onSnapshot, 
+  doc, 
+  setDoc, 
+  updateDoc, 
+  increment 
+} from "firebase/firestore";
+import { 
+  Heart, 
+  Menu, 
   Calendar, 
   ArrowRight, 
   Sparkles, 
   MapPin, 
   Users, 
   Compass, 
-  Sprout,
-  ChevronLeft,
-  ChevronRight
+  Sprout, 
+  ChevronLeft, 
+  ChevronRight 
 } from "lucide-react";
 
-// Slide data for the hero background slider
-const HERO_SLIDES = [
+const LOGO_URL = "https://i.postimg.cc/HLsfSHMm/Whats-App-Image-2026-09-03-at-09-49-04.jpg";
+
+interface SlideItem {
+  id: string;
+  tag: string;
+  title: string;
+  description: string;
+  date: string;
+  venue: string;
+  imageUrl: string;
+  ctaText: string;
+  targetTab: string;
+}
+
+const DEFAULT_SLIDES: SlideItem[] = [
   {
     id: "slide-1",
     tag: "Next Club Assembly • Wednesday @ 4:00 PM",
-    badge: "Conservation • Exploration • Youth Impact",
     title: "Aberdare Forest Basin & Water Tower Restoration",
     description: "Join our next student expedition restoring native highland biodiversity, planting indigenous seedlings, and protecting water towers.",
-    date: "Saturday • Full Day Field Excursion",
+    date: "Saturday • Full Day Excursion",
     venue: "Main Gate • 6:30 AM Sharp",
     imageUrl: "https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?auto=format&fit=crop&w=1920&q=80",
     ctaText: "View Expedition Details",
@@ -38,7 +62,6 @@ const HERO_SLIDES = [
   {
     id: "slide-2",
     tag: "Hands-on Conservation Drive",
-    badge: "Climate Action Milestone",
     title: "Campus Indigenous Tree Nursery Maintenance",
     description: "Hands-on seedling potting, soil mixture preparation, and seedbed expansion at our dedicated university nursery site.",
     date: "Wednesday • 3:30 PM",
@@ -47,251 +70,417 @@ const HERO_SLIDES = [
     ctaText: "Get Involved",
     targetTab: "membership",
   },
-  {
-    id: "slide-3",
-    tag: "EcoPulse Debate & Challenges",
-    badge: "Youth Leadership Summit",
-    title: "Wildlife Habitat Advocacy & Climate Policy Talks",
-    description: "Weekly peer discussions on frontline environmental policy, carbon markets, and awarding this week's nature photography winners.",
-    date: "Every Wednesday Session",
-    venue: "Resource Centre Hall 2",
-    imageUrl: "https://images.unsplash.com/photo-1511556532299-8f662fc26c06?auto=format&fit=crop&w=1920&q=80",
-    ctaText: "Read EcoPulse Buzz",
-    targetTab: "ecopulse",
-  },
 ];
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<string>("home");
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [slides, setSlides] = useState<SlideItem[]>(DEFAULT_SLIDES);
   const [currentSlide, setCurrentSlide] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
 
-  // Auto slide cycle every 6 seconds (pauses when hovering over the hero)
+  // Likes Counter State
+  const [likesCount, setLikesCount] = useState<number>(128);
+  const [hasLiked, setHasLiked] = useState<boolean>(false);
+  const [likeAnimating, setLikeAnimating] = useState(false);
+
+  // 1. Sync Live Uploaded Images into Hero Slider
   useEffect(() => {
-    if (isPaused || activeTab !== "home") return;
+    const qEvents = query(collection(db, "events"), orderBy("createdAt", "desc"));
+    const qSnaps = query(collection(db, "nature_snaps"), orderBy("createdAt", "desc"));
+
+    let liveEventSlides: SlideItem[] = [];
+    let liveSnapSlides: SlideItem[] = [];
+
+    const unsubEvents = onSnapshot(qEvents, (snapshot) => {
+      liveEventSlides = snapshot.docs
+        .filter((d) => Boolean(d.data().imageUrl))
+        .map((d) => {
+          const data = d.data();
+          return {
+            id: `evt-${d.id}`,
+            tag: data.type === "upcoming" ? "Upcoming Club Excursion" : "Previous Highlight",
+            title: data.title || "Club Excursion",
+            description: data.statement12Words || "Environmental conservation, biodiversity preservation, and mountaineering.",
+            date: data.date || "Scheduled Date",
+            venue: data.venue || "DKUT Grounds",
+            imageUrl: data.imageUrl,
+            ctaText: "View Events & Details",
+            targetTab: "events",
+          };
+        });
+      updateCombinedSlides();
+    });
+
+    const unsubSnaps = onSnapshot(qSnaps, (snapshot) => {
+      liveSnapSlides = snapshot.docs
+        .filter((d) => Boolean(d.data().imageUrl))
+        .map((d) => {
+          const data = d.data();
+          return {
+            id: `snap-${d.id}`,
+            tag: `Nature Snap • ${data.weekLabel || "Award Winner"}`,
+            title: data.title || "Nature Photography",
+            description: `Awarded capture by ${data.photographerName || "Club Member"}${data.cameraInfo ? ` (${data.cameraInfo})` : ""}.`,
+            date: data.semester || "Semester Active",
+            venue: data.location || "Conservation Trail",
+            imageUrl: data.imageUrl,
+            ctaText: "View Nature Gallery",
+            targetTab: "snaps",
+          };
+        });
+      updateCombinedSlides();
+    });
+
+    const updateCombinedSlides = () => {
+      const merged = [...liveEventSlides, ...liveSnapSlides];
+      if (merged.length > 0) {
+        setSlides(merged);
+      } else {
+        setSlides(DEFAULT_SLIDES);
+      }
+    };
+
+    return () => {
+      unsubEvents();
+      unsubSnaps();
+    };
+  }, []);
+
+  // 2. Sync Likes Counter
+  useEffect(() => {
+    const liked = localStorage.getItem("dekuwec_site_liked") === "true";
+    setHasLiked(liked);
+
+    const statsRef = doc(db, "site_stats", "likes");
+    const unsubLikes = onSnapshot(statsRef, (docSnap) => {
+      if (docSnap.exists()) {
+        setLikesCount(docSnap.data().count ?? 128);
+      } else {
+        setDoc(statsRef, { count: 128 }, { merge: true });
+      }
+    });
+
+    return () => unsubLikes();
+  }, []);
+
+  const handleLikeToggle = async () => {
+    setLikeAnimating(true);
+    setTimeout(() => setLikeAnimating(false), 500);
+
+    const statsRef = doc(db, "site_stats", "likes");
+    try {
+      if (!hasLiked) {
+        setHasLiked(true);
+        setLikesCount((prev) => prev + 1);
+        localStorage.setItem("dekuwec_site_liked", "true");
+        await updateDoc(statsRef, { count: increment(1) });
+      } else {
+        setHasLiked(false);
+        setLikesCount((prev) => Math.max(0, prev - 1));
+        localStorage.removeItem("dekuwec_site_liked");
+        await updateDoc(statsRef, { count: increment(-1) });
+      }
+    } catch (err) {
+      console.error("Failed to update likes:", err);
+    }
+  };
+
+  // Auto slide cycle
+  useEffect(() => {
+    if (isPaused || activeTab !== "home" || slides.length <= 1) return;
     const interval = setInterval(() => {
-      setCurrentSlide((prev) => (prev + 1) % HERO_SLIDES.length);
-    }, 6000);
+      setCurrentSlide((prev) => (prev + 1) % slides.length);
+    }, 6500);
     return () => clearInterval(interval);
-  }, [isPaused, activeTab]);
+  }, [isPaused, activeTab, slides.length]);
 
   const prevSlide = () => {
-    setCurrentSlide((prev) => (prev - 1 + HERO_SLIDES.length) % HERO_SLIDES.length);
+    setCurrentSlide((prev) => (prev - 1 + slides.length) % slides.length);
   };
 
   const nextSlide = () => {
-    setCurrentSlide((prev) => (prev + 1) % HERO_SLIDES.length);
+    setCurrentSlide((prev) => (prev + 1) % slides.length);
   };
 
+  const activeItem = slides[currentSlide] || slides[0];
+
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900 selection:bg-emerald-100 selection:text-emerald-900">
+    <div className="min-h-screen flex bg-slate-50 text-slate-900 font-sans selection:bg-emerald-100 selection:text-emerald-900">
       
-      {/* Header Navigation */}
-      <Navbar activeTab={activeTab} setActiveTab={setActiveTab} />
+      {/* Left Navigation Sidebar */}
+      <Navbar 
+        activeTab={activeTab} 
+        setActiveTab={setActiveTab} 
+        mobileMenuOpen={mobileMenuOpen}
+        setMobileMenuOpen={setMobileMenuOpen}
+      />
 
-      <main className="flex-grow">
-        {/* ===================== TAB 0: HOME PAGE (DEFAULT) ===================== */}
-        {activeTab === "home" && (
-          <div>
-            {/* Full-Bleed Hero Background Slider */}
-            <section 
-              className="relative min-h-[580px] lg:min-h-[660px] flex items-center overflow-hidden bg-slate-950 text-white"
-              onMouseEnter={() => setIsPaused(true)}
-              onMouseLeave={() => setIsPaused(false)}
+      {/* Main Content Area */}
+      <div className="flex-1 flex flex-col min-w-0 lg:pl-72">
+        
+        {/* Top App Header */}
+        <header className="sticky top-0 z-30 bg-white/90 backdrop-blur-md border-b border-slate-200 px-4 sm:px-8 py-3.5 flex items-center justify-between shadow-xs">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setMobileMenuOpen(true)}
+              aria-label="Open menu"
+              className="lg:hidden p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 transition"
             >
-              {/* Background Slides */}
-              {HERO_SLIDES.map((slide, index) => (
-                <div
-                  key={slide.id}
-                  className={`absolute inset-0 transition-opacity duration-1000 ease-in-out ${
-                    index === currentSlide ? "opacity-100 z-10" : "opacity-0 z-0 pointer-events-none"
-                  }`}
-                >
-                  <img
-                    src={slide.imageUrl}
-                    alt={slide.title}
-                    className="h-full w-full object-cover transform scale-105 transition-transform duration-[6000ms] ease-out"
-                  />
-                  {/* Multistage Gradient Overlays for High Contrast Readability */}
-                  <div className="absolute inset-0 bg-gradient-to-r from-emerald-950/95 via-emerald-950/80 to-slate-950/40"></div>
-                  <div className="absolute inset-0 bg-gradient-to-t from-slate-950/90 via-transparent to-black/30"></div>
-                </div>
-              ))}
+              <Menu className="h-5 w-5" />
+            </button>
 
-              {/* Slider Left Arrow */}
-              <button
-                onClick={prevSlide}
-                aria-label="Previous Slide"
-                className="absolute left-4 sm:left-8 z-30 p-3 rounded-full bg-black/40 hover:bg-black/70 text-white border border-white/20 backdrop-blur-md transition hover:scale-110 shadow-lg"
-              >
-                <ChevronLeft className="h-6 w-6" />
-              </button>
-
-              {/* Slider Right Arrow */}
-              <button
-                onClick={nextSlide}
-                aria-label="Next Slide"
-                className="absolute right-4 sm:right-8 z-30 p-3 rounded-full bg-black/40 hover:bg-black/70 text-white border border-white/20 backdrop-blur-md transition hover:scale-110 shadow-lg"
-              >
-                <ChevronRight className="h-6 w-6" />
-              </button>
-
-              {/* Foreground Hero Content */}
-              <div className="relative z-20 mx-auto max-w-7xl px-8 sm:px-14 py-20 w-full">
-                <div className="max-w-2xl space-y-6">
-                  
-                  {/* Sub-badge */}
-                  <div className="inline-flex items-center gap-2 rounded-full bg-emerald-500/20 px-4 py-1.5 text-xs font-bold text-emerald-300 border border-emerald-400/30 backdrop-blur-md">
-                    <Sparkles className="h-3.5 w-3.5 text-emerald-400 animate-pulse" />
-                    <span>{HERO_SLIDES[currentSlide].tag}</span>
-                  </div>
-
-                  {/* Title */}
-                  <h1 className="text-3xl sm:text-5xl lg:text-6xl font-black tracking-tight leading-tight text-white drop-shadow-md transition-all duration-500">
-                    {HERO_SLIDES[currentSlide].title}
-                  </h1>
-
-                  {/* Description */}
-                  <p className="text-sm sm:text-base text-emerald-100/90 leading-relaxed font-normal drop-shadow">
-                    {HERO_SLIDES[currentSlide].description}
-                  </p>
-
-                  {/* Date & Location Pill */}
-                  <div className="flex flex-wrap items-center gap-4 text-xs font-semibold text-emerald-200">
-                    <div className="flex items-center gap-1.5 bg-black/30 px-3 py-1.5 rounded-lg backdrop-blur-sm border border-white/10">
-                      <Calendar className="h-4 w-4 text-emerald-400" />
-                      <span>{HERO_SLIDES[currentSlide].date}</span>
-                    </div>
-                    <div className="flex items-center gap-1.5 bg-black/30 px-3 py-1.5 rounded-lg backdrop-blur-sm border border-white/10">
-                      <MapPin className="h-4 w-4 text-emerald-400" />
-                      <span>{HERO_SLIDES[currentSlide].venue}</span>
-                    </div>
-                  </div>
-
-                  {/* CTA Buttons */}
-                  <div className="pt-2 flex flex-wrap gap-4">
-                    <button
-                      onClick={() => setActiveTab(HERO_SLIDES[currentSlide].targetTab)}
-                      className="flex items-center gap-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 px-6 py-3.5 text-sm font-bold text-slate-950 shadow-xl transition hover:scale-[1.02]"
-                    >
-                      <span>{HERO_SLIDES[currentSlide].ctaText}</span>
-                      <ArrowRight className="h-4 w-4" />
-                    </button>
-
-                    <button
-                      onClick={() => setActiveTab("membership")}
-                      className="rounded-xl border border-white/20 bg-white/10 hover:bg-white/20 px-6 py-3.5 text-sm font-bold text-white backdrop-blur-md transition"
-                    >
-                      Join DEKUWEC
-                    </button>
-                  </div>
-
-                </div>
+            <div className="flex items-center gap-3">
+              <img
+                src={LOGO_URL}
+                alt="DEKUWEC Logo"
+                className="h-9 w-9 rounded-xl object-cover ring-1 ring-emerald-500/40 lg:hidden shadow-xs"
+              />
+              <div>
+                <h2 className="text-sm font-black text-slate-900 leading-none">
+                  {activeTab === "home" && "DEKUWEC Portal"}
+                  {activeTab === "events" && "Events & Excursions"}
+                  {activeTab === "ecopulse" && "EcoPulse News & Debates"}
+                  {activeTab === "snaps" && "Nature Snaps Wall"}
+                  {activeTab === "membership" && "Club Membership"}
+                  {activeTab === "support" && "Help & Inquiries"}
+                </h2>
+                <p className="text-[11px] text-emerald-700 font-bold mt-0.5">
+                  Dedan Kimathi University of Technology
+                </p>
               </div>
+            </div>
+          </div>
 
-              {/* Bottom Dot Indicators (like Microsoft Store) */}
-              <div className="absolute bottom-6 left-0 right-0 z-30 flex justify-center items-center gap-2">
-                {HERO_SLIDES.map((_, dotIdx) => (
-                  <button
-                    key={dotIdx}
-                    onClick={() => setCurrentSlide(dotIdx)}
-                    aria-label={`Go to slide ${dotIdx + 1}`}
-                    className={`h-2.5 rounded-full transition-all duration-300 ${
-                      dotIdx === currentSlide 
-                        ? "w-8 bg-emerald-400" 
-                        : "w-2.5 bg-white/40 hover:bg-white/70"
+          {/* Real-time Like Pill */}
+          <div className="flex items-center gap-2.5">
+            <button
+              onClick={handleLikeToggle}
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-bold transition-all border ${
+                hasLiked
+                  ? "bg-rose-50 text-rose-600 border-rose-200 shadow-xs"
+                  : "bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200"
+              } ${likeAnimating ? "scale-110" : "scale-100"}`}
+              title="Like this portal"
+            >
+              <Heart
+                className={`h-4 w-4 transition-transform ${
+                  hasLiked ? "fill-rose-500 text-rose-500 scale-110" : "text-slate-500"
+                }`}
+              />
+              <span className="font-extrabold">{likesCount.toLocaleString()}</span>
+              <span className="hidden sm:inline font-medium text-slate-500">
+                {hasLiked ? "Liked" : "Likes"}
+              </span>
+            </button>
+          </div>
+        </header>
+
+        {/* View Switcher */}
+        <main className="flex-grow">
+          {/* ===================== TAB 0: HOME PAGE ===================== */}
+          {activeTab === "home" && (
+            <div>
+              {/* Single Hero Slider Displaying All Uploaded Images */}
+              <section 
+                className="relative min-h-[580px] lg:min-h-[660px] flex items-center overflow-hidden bg-slate-950 text-white"
+                onMouseEnter={() => setIsPaused(true)}
+                onMouseLeave={() => setIsPaused(false)}
+              >
+                {slides.map((slide, index) => (
+                  <div
+                    key={slide.id}
+                    className={`absolute inset-0 transition-opacity duration-1000 ease-in-out ${
+                      index === currentSlide ? "opacity-100 z-10" : "opacity-0 z-0 pointer-events-none"
                     }`}
-                  />
+                  >
+                    <img
+                      src={slide.imageUrl}
+                      alt={slide.title}
+                      className="h-full w-full object-cover transform scale-105 transition-transform duration-[6500ms] ease-out"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-r from-emerald-950/95 via-emerald-950/80 to-slate-950/40"></div>
+                    <div className="absolute inset-0 bg-gradient-to-t from-slate-950/90 via-transparent to-black/30"></div>
+                  </div>
                 ))}
-              </div>
-            </section>
 
-            {/* Hub Navigator Section */}
-            <section className="py-16 bg-white border-b border-slate-200">
-              <div className="max-w-7xl mx-auto px-4 sm:px-6">
-                <div className="text-center max-w-xl mx-auto mb-10">
-                  <h2 className="text-2xl sm:text-3xl font-black text-slate-900">Explore DEKUWEC Hubs</h2>
-                  <p className="text-sm text-slate-500 mt-1">Direct access to our club functions and activities.</p>
+                {slides.length > 1 && (
+                  <>
+                    <button
+                      onClick={prevSlide}
+                      aria-label="Previous Slide"
+                      className="absolute left-3 sm:left-6 z-30 p-3 rounded-full bg-black/40 hover:bg-black/70 text-white border border-white/20 backdrop-blur-md transition hover:scale-110 shadow-lg"
+                    >
+                      <ChevronLeft className="h-6 w-6" />
+                    </button>
+
+                    <button
+                      onClick={nextSlide}
+                      aria-label="Next Slide"
+                      className="absolute right-3 sm:right-6 z-30 p-3 rounded-full bg-black/40 hover:bg-black/70 text-white border border-white/20 backdrop-blur-md transition hover:scale-110 shadow-lg"
+                    >
+                      <ChevronRight className="h-6 w-6" />
+                    </button>
+                  </>
+                )}
+
+                {/* Hero Overlay Content */}
+                <div className="relative z-20 mx-auto max-w-5xl px-6 sm:px-14 py-16 sm:py-20 w-full">
+                  <div className="max-w-2xl space-y-5 sm:space-y-6">
+                    <div className="inline-flex items-center gap-2 rounded-full bg-emerald-500/20 px-3.5 py-1 text-xs font-bold text-emerald-300 border border-emerald-400/30 backdrop-blur-md">
+                      <Sparkles className="h-3.5 w-3.5 text-emerald-400 animate-pulse" />
+                      <span>{activeItem.tag}</span>
+                    </div>
+
+                    <h1 className="text-2xl sm:text-5xl lg:text-6xl font-black tracking-tight leading-tight text-white drop-shadow-md transition-all duration-500">
+                      {activeItem.title}
+                    </h1>
+
+                    <p className="text-xs sm:text-base text-emerald-100/90 leading-relaxed font-normal drop-shadow line-clamp-3 sm:line-clamp-none">
+                      {activeItem.description}
+                    </p>
+
+                    <div className="flex flex-wrap items-center gap-3 text-xs font-semibold text-emerald-200">
+                      <div className="flex items-center gap-1.5 bg-black/30 px-3 py-1.5 rounded-lg backdrop-blur-sm border border-white/10">
+                        <Calendar className="h-4 w-4 text-emerald-400" />
+                        <span>{activeItem.date}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 bg-black/30 px-3 py-1.5 rounded-lg backdrop-blur-sm border border-white/10">
+                        <MapPin className="h-4 w-4 text-emerald-400" />
+                        <span>{activeItem.venue}</span>
+                      </div>
+                    </div>
+
+                    <div className="pt-2 flex flex-wrap gap-3 sm:gap-4">
+                      <button
+                        onClick={() => setActiveTab(activeItem.targetTab)}
+                        className="flex items-center gap-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 px-5 sm:px-6 py-3 text-xs sm:text-sm font-bold text-slate-950 shadow-xl transition hover:scale-[1.02]"
+                      >
+                        <span>{activeItem.ctaText}</span>
+                        <ArrowRight className="h-4 w-4" />
+                      </button>
+
+                      <button
+                        onClick={() => setActiveTab("membership")}
+                        className="rounded-xl border border-white/20 bg-white/10 hover:bg-white/20 px-5 sm:px-6 py-3 text-xs sm:text-sm font-bold text-white backdrop-blur-md transition"
+                      >
+                        Join DEKUWEC
+                      </button>
+                    </div>
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                  <div 
-                    onClick={() => setActiveTab("events")}
-                    className="p-6 rounded-3xl bg-slate-50 border border-slate-200/80 hover:border-emerald-500/40 hover:shadow-md transition cursor-pointer group"
-                  >
-                    <div className="p-3 rounded-2xl bg-emerald-100 text-emerald-800 w-fit group-hover:scale-105 transition-transform">
-                      <Calendar className="h-6 w-6" />
-                    </div>
-                    <h3 className="font-bold text-base text-slate-900 mt-4 group-hover:text-emerald-700 transition">Events & Activities</h3>
-                    <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
-                      Upcoming mountain trails, cleanups, and previous semester photo albums.
-                    </p>
+                {/* Dot Pagination */}
+                {slides.length > 1 && (
+                  <div className="absolute bottom-6 left-0 right-0 z-30 flex justify-center items-center gap-2">
+                    {slides.map((_, dotIdx) => (
+                      <button
+                        key={dotIdx}
+                        onClick={() => setCurrentSlide(dotIdx)}
+                        aria-label={`Go to slide ${dotIdx + 1}`}
+                        className={`h-2.5 rounded-full transition-all duration-300 ${
+                          dotIdx === currentSlide 
+                            ? "w-8 bg-emerald-400" 
+                            : "w-2.5 bg-white/40 hover:bg-white/70"
+                        }`}
+                      />
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              {/* Hub Navigator */}
+              <section className="py-16 bg-white border-b border-slate-200">
+                <div className="max-w-6xl mx-auto px-4 sm:px-6">
+                  <div className="text-center max-w-xl mx-auto mb-10">
+                    <h2 className="text-2xl sm:text-3xl font-black text-slate-900">Explore DEKUWEC Hubs</h2>
+                    <p className="text-sm text-slate-500 mt-1">Direct access to our club functions and activities.</p>
                   </div>
 
-                  <div 
-                    onClick={() => setActiveTab("ecopulse")}
-                    className="p-6 rounded-3xl bg-slate-50 border border-slate-200/80 hover:border-emerald-500/40 hover:shadow-md transition cursor-pointer group"
-                  >
-                    <div className="p-3 rounded-2xl bg-emerald-100 text-emerald-800 w-fit group-hover:scale-105 transition-transform">
-                      <Sprout className="h-6 w-6" />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                    <div 
+                      onClick={() => setActiveTab("events")}
+                      className="p-6 rounded-3xl bg-slate-50 border border-slate-200/80 hover:border-emerald-500/40 hover:shadow-md transition cursor-pointer group"
+                    >
+                      <div className="p-3 rounded-2xl bg-emerald-100 text-emerald-800 w-fit group-hover:scale-105 transition-transform">
+                        <Calendar className="h-6 w-6" />
+                      </div>
+                      <h3 className="font-bold text-base text-slate-900 mt-4 group-hover:text-emerald-700 transition">Events & Activities</h3>
+                      <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+                        Upcoming mountain trails, cleanups, and previous semester photo albums.
+                      </p>
                     </div>
-                    <h3 className="font-bold text-base text-slate-900 mt-4 group-hover:text-emerald-700 transition">EcoPulse Buzz</h3>
-                    <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
-                      Weekly challenge quizzes, environmental news, and floor debate topics.
-                    </p>
-                  </div>
 
-                  <div 
-                    onClick={() => setActiveTab("snaps")}
-                    className="p-6 rounded-3xl bg-slate-50 border border-slate-200/80 hover:border-emerald-500/40 hover:shadow-md transition cursor-pointer group"
-                  >
-                    <div className="p-3 rounded-2xl bg-emerald-100 text-emerald-800 w-fit group-hover:scale-105 transition-transform">
-                      <Compass className="h-6 w-6" />
+                    <div 
+                      onClick={() => setActiveTab("ecopulse")}
+                      className="p-6 rounded-3xl bg-slate-50 border border-slate-200/80 hover:border-emerald-500/40 hover:shadow-md transition cursor-pointer group"
+                    >
+                      <div className="p-3 rounded-2xl bg-emerald-100 text-emerald-800 w-fit group-hover:scale-105 transition-transform">
+                        <Sprout className="h-6 w-6" />
+                      </div>
+                      <h3 className="font-bold text-base text-slate-900 mt-4 group-hover:text-emerald-700 transition">EcoPulse Buzz</h3>
+                      <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+                        Weekly challenge quizzes, environmental news, and floor debate topics.
+                      </p>
                     </div>
-                    <h3 className="font-bold text-base text-slate-900 mt-4 group-hover:text-emerald-700 transition">Nature Snaps</h3>
-                    <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
-                      Weekly student photography awards and collaborative Google Photos album.
-                    </p>
-                  </div>
 
-                  <div 
-                    onClick={() => setActiveTab("membership")}
-                    className="p-6 rounded-3xl bg-slate-50 border border-slate-200/80 hover:border-emerald-500/40 hover:shadow-md transition cursor-pointer group"
-                  >
-                    <div className="p-3 rounded-2xl bg-emerald-100 text-emerald-800 w-fit group-hover:scale-105 transition-transform">
-                      <Users className="h-6 w-6" />
+                    <div 
+                      onClick={() => setActiveTab("snaps")}
+                      className="p-6 rounded-3xl bg-slate-50 border border-slate-200/80 hover:border-emerald-500/40 hover:shadow-md transition cursor-pointer group"
+                    >
+                      <div className="p-3 rounded-2xl bg-emerald-100 text-emerald-800 w-fit group-hover:scale-105 transition-transform">
+                        <Compass className="h-6 w-6" />
+                      </div>
+                      <h3 className="font-bold text-base text-slate-900 mt-4 group-hover:text-emerald-700 transition">Nature Snaps</h3>
+                      <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+                        Weekly student photography awards and collaborative Google Photos album.
+                      </p>
                     </div>
-                    <h3 className="font-bold text-base text-slate-900 mt-4 group-hover:text-emerald-700 transition">Membership Portal</h3>
-                    <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
-                      Enroll as a new member or verify existing registration records.
-                    </p>
+
+                    <div 
+                      onClick={() => setActiveTab("membership")}
+                      className="p-6 rounded-3xl bg-slate-50 border border-slate-200/80 hover:border-emerald-500/40 hover:shadow-md transition cursor-pointer group"
+                    >
+                      <div className="p-3 rounded-2xl bg-emerald-100 text-emerald-800 w-fit group-hover:scale-105 transition-transform">
+                        <Users className="h-6 w-6" />
+                      </div>
+                      <h3 className="font-bold text-base text-slate-900 mt-4 group-hover:text-emerald-700 transition">Membership Portal</h3>
+                      <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+                        Enroll as a new member or verify existing registration records.
+                      </p>
+                    </div>
                   </div>
                 </div>
-              </div>
-            </section>
-          </div>
-        )}
+              </section>
+            </div>
+          )}
 
-        {/* Tab Views */}
-        {activeTab === "events" && <EventsSection />}
-        {activeTab === "ecopulse" && <EcoPulseSection />}
-        {activeTab === "snaps" && <NatureSnapsSection />}
-        {activeTab === "membership" && <MembershipSection />}
-        {activeTab === "support" && <SupportSection />}
-      </main>
+          {/* Sub-view Routing */}
+          {activeTab === "events" && <EventsSection />}
+          {activeTab === "ecopulse" && <EcoPulseSection />}
+          {activeTab === "snaps" && <NatureSnapsSection />}
+          {activeTab === "membership" && <MembershipSection />}
+          {activeTab === "support" && <SupportSection />}
+        </main>
 
-      {/* Global Footer */}
-      <footer className="border-t border-slate-200 bg-white py-10">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-2 text-emerald-900 font-bold text-sm">
-            <Trees className="h-5 w-5 text-emerald-700" />
-            <span>Dedan Kimathi Wildlife & Environmental Club (DEKUWEC)</span>
+        {/* Global Footer */}
+        <footer className="border-t border-slate-200 bg-white py-10 px-4 sm:px-8">
+          <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="flex items-center gap-3 text-emerald-900 font-bold text-sm">
+              <img
+                src={LOGO_URL}
+                alt="DEKUWEC"
+                className="h-8 w-8 rounded-lg object-cover"
+              />
+              <span>Dedan Kimathi Wildlife & Environmental Club (DEKUWEC)</span>
+            </div>
+            <p className="text-xs text-slate-500 text-center sm:text-right">
+              © {new Date().getFullYear()} DEKUWEC • Dedan Kimathi University of Technology • All Rights Reserved.
+            </p>
           </div>
-          <p className="text-xs text-slate-500 text-center sm:text-right">
-            © {new Date().getFullYear()} DEKUWEC • Dedan Kimathi University of Technology • All Rights Reserved.
-          </p>
-        </div>
-      </footer>
+        </footer>
+      </div>
+
     </div>
   );
 }
