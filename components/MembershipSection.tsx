@@ -2,207 +2,169 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { auth, db, storage } from "@/lib/firebase";
-import { GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, User } from "firebase/auth";
-import { doc, getDoc, setDoc, updateDoc, collection, query, where, onSnapshot } from "firebase/firestore";
-import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
+import { useRouter } from "next/navigation";
+import { db, auth } from "@/lib/firebase";
+import { collection, onSnapshot, doc, updateDoc, setDoc } from "firebase/firestore";
+import { onAuthStateChanged } from "firebase/auth";
 import { 
   Users, 
-  LogOut, 
-  User as UserIcon, 
   ShieldCheck, 
-  Clock, 
-  UploadCloud, 
-  Plus, 
+  Search, 
   CheckCircle2, 
-  BookOpen, 
+  X, 
+  ChevronRight, 
+  Mail, 
+  Send,
+  User,
   GraduationCap,
-  Activity,
-  Trash2,
-  AlertCircle
+  Clock
 } from "lucide-react";
 
-// The official pre-registered 64 members
+// Official 64 Members
 const OFFICIAL_MEMBERS = [
-  "Edith Asachita", "Neema Kimutai", "Trecy Kipchoge", "Orville Awour", "Margaret Karongo", 
-  "Samuel Ndicu", "Phillip Theuri", "Mercy Njoki", "Joyline Selim", "Babra Cherop", 
-  "Clinton Kiptoo", "Charles Nderitu", "Amanda Matata", "Lincoln Mureithi", "Daniel Smith", 
-  "John Muchai", "Claire Njeri", "Sophia Kinyua", "Elijah Isaac", "Kelvin Maina", 
-  "Michael Kiborom", "Victor Mbau", "Manasse koech", "Curtis kioko", "Hannah Macharia", 
-  "Keith Bundi", "Victoria Cherotich", "Eoudiah Kiptoon", "Elizabeth Nduli", "Harrison Kimwaki", 
-  "George kimani", "Hazeline okendo", "John Wamui", "Emmanuel Muron", "Patricia Lenanyangera", 
-  "Bonface Njogu", "Nedi kavwaiza", "Zac", "Abigael Chebet", "Ian Wambua", "Peter Komen", 
-  "Grace Chebet", "Andrew Sawe", "Elijah mutua", "Robert Nderitu", "Mercy mutheu", 
-  "Winnie njeri", "Regina", "Annabel Odege", "Leonidah kiboror", "Lewis Njuguna", 
-  "Bett Kimutai", "Jael Oketch", "Elvis Muyai", "Maureen Chepngeno", "Leonidas Mbogo", 
-  "Jael Oketch", "Titus kibos", "Hezron Pkemoi", "Felistas kome", "Lodio josephat", 
-  "Celestine kiptoo", "Tom alando", "Lennis gitau"
+  "Abigael Chebet", "Amanda Matata", "Andrew Sawe", "Annabel Odege", "Babra Cherop",
+  "Bett Kimutai", "Bonface Njogu", "Celestine kiptoo", "Charles Nderitu", "Claire Njeri",
+  "Clinton Kiptoo", "Curtis kioko", "Daniel Smith", "Edith Asachita", "Elijah Isaac",
+  "Elijah mutua", "Elizabeth Nduli", "Elvis Muyai", "Emmanuel Muron", "Eoudiah Kiptoon",
+  "Felistas kome", "George kimani", "Grace Chebet", "Hannah Macharia", "Harrison Kimwaki",
+  "Hazeline okendo", "Hezron Pkemoi", "Ian Wambua", "Jael Oketch", "John Muchai",
+  "John Wamui", "Joyline Selim", "Keith Bundi", "Kelvin Maina", "Lennis gitau",
+  "Leonidas Mbogo", "Leonidah kiboror", "Lewis Njuguna", "Lincoln Mureithi", "Lodio josephat",
+  "Manasse koech", "Margaret Karongo", "Maureen Chepngeno", "Mercy mutheu", "Mercy Njoki",
+  "Michael Kiborom", "Nedi kavwaiza", "Neema Kimutai", "Orville Awour", "Patricia Lenanyangera",
+  "Peter Komen", "Phillip Theuri", "Regina", "Robert Nderitu", "Samuel Ndicu",
+  "Sophia Kinyua", "Titus kibos", "Tom alando", "Trecy Kipchoge", "Victor Mbau",
+  "Victoria Cherotich", "Winnie njeri", "Zac"
 ];
 
 interface UserProfile {
   uid: string;
   displayName: string;
   email: string;
-  photoURL: string;
-  course: string;
-  year: string;
-  status: "Approved" | "Pending";
-  activities: string[];
+  photoURL?: string;
+  course?: string;
+  year?: string;
+  status: "Approved" | "Pending" | "Unregistered";
+  activities?: string[];
 }
 
 export default function MembershipSection() {
-  const [user, setUser] = useState<User | null>(null);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [liveApprovedMembers, setLiveApprovedMembers] = useState<UserProfile[]>([]);
-  
-  // UI States
-  const [activeTab, setActiveTab] = useState<"directory" | "profile">("directory");
-  const [isUpdating, setIsUpdating] = useState(false);
-  const [uploadingImage, setUploadingImage] = useState(false);
-  const [newActivity, setNewActivity] = useState("");
+  const router = useRouter();
+  const [currentUserUid, setCurrentUserUid] = useState<string | null>(null);
+  const [currentUserEmail, setCurrentUserEmail] = useState<string>("");
+  const [firestoreMembers, setFirestoreMembers] = useState<UserProfile[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
 
-  // Profile Form States
-  const [editCourse, setEditCourse] = useState("");
-  const [editYear, setEditYear] = useState("");
+  // Modals and form state
+  const [showYesModal, setShowYesModal] = useState(false);
+  const [showVerifyModal, setShowVerifyModal] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [verificationSubmitted, setVerificationSubmitted] = useState(false);
 
-  // 1. Listen for Authentication State
+  // Verification Form fields: only name, email, year
+  const [verifyName, setVerifyName] = useState("");
+  const [verifyEmail, setVerifyEmail] = useState("");
+  const [verifyYear, setVerifyYear] = useState("Year 1");
+
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      setUser(currentUser);
-      if (currentUser) {
-        // Fetch or create user document in Firestore
-        const userRef = doc(db, "members", currentUser.uid);
-        const docSnap = await getDoc(userRef);
-
-        if (docSnap.exists()) {
-          const data = docSnap.data() as UserProfile;
-          setProfile(data);
-          setEditCourse(data.course || "");
-          setEditYear(data.year || "");
-        } else {
-          // First-time login: Create pending profile
-          const newProfile: UserProfile = {
-            uid: currentUser.uid,
-            displayName: currentUser.displayName || "New Member",
-            email: currentUser.email || "",
-            photoURL: currentUser.photoURL || "",
-            course: "",
-            year: "",
-            status: "Pending", // Requires admin approval to show on board
-            activities: [],
-          };
-          await setDoc(userRef, newProfile);
-          setProfile(newProfile);
-        }
-        setActiveTab("profile");
-      } else {
-        setProfile(null);
-        setActiveTab("directory");
+    const unsubAuth = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        setCurrentUserUid(user.uid);
+        setCurrentUserEmail(user.email || "");
       }
     });
 
-    return () => unsubscribe();
-  }, []);
-
-  // 2. Fetch Live Approved Members from Firestore
-  useEffect(() => {
-    const q = query(collection(db, "members"), where("status", "==", "Approved"));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const approved = snapshot.docs.map((d) => d.data() as UserProfile);
-      setLiveApprovedMembers(approved);
+    const unsubFirestore = onSnapshot(collection(db, "members"), (snapshot) => {
+      const members = snapshot.docs.map((d) => d.data() as UserProfile);
+      setFirestoreMembers(members);
     });
-    return () => unsubscribe();
+
+    return () => {
+      unsubAuth();
+      unsubFirestore();
+    };
   }, []);
 
-  // Handle Google Login
-  const handleGoogleLogin = async () => {
-    try {
-      const provider = new GoogleAuthProvider();
-      await signInWithPopup(auth, provider);
-    } catch (error) {
-      console.error("Login failed:", error);
-    }
+  // Deduplicate and combine legacy list with Firestore entries
+  const claimedNames = firestoreMembers.map((m) => (m.displayName || "").toLowerCase());
+  
+  const unclaimedOfficial: UserProfile[] = OFFICIAL_MEMBERS
+    .filter((name) => !claimedNames.includes(name.toLowerCase()))
+    .map((name) => ({
+      uid: `legacy-${name.toLowerCase().replace(/\s+/g, "-")}`,
+      displayName: name,
+      email: "",
+      course: "Registered Member",
+      year: "",
+      status: "Approved",
+    }));
+
+  const allDirectoryMembers = [...unclaimedOfficial, ...firestoreMembers]
+    .sort((a, b) => (a.displayName || "").localeCompare(b.displayName || ""))
+    .filter((m) => (m.displayName || "").toLowerCase().includes(searchQuery.toLowerCase()));
+
+  // 1. User selects their name from the "Yes, I am" modal
+  const handleSelectName = (selectedName: string) => {
+    setVerifyName(selectedName);
+    setVerifyEmail(currentUserEmail || "");
+    setVerifyYear("Year 1");
+    setVerificationSubmitted(false);
+    setShowYesModal(false);
+    setShowVerifyModal(true);
   };
 
-  const handleLogout = async () => {
-    await signOut(auth);
-    setActiveTab("directory");
-  };
-
-  // Profile Actions
-  const handleUpdateProfile = async () => {
-    if (!user || !profile) return;
-    setIsUpdating(true);
-    try {
-      const userRef = doc(db, "members", user.uid);
-      await updateDoc(userRef, {
-        course: editCourse.trim(),
-        year: editYear.trim(),
-      });
-      setProfile({ ...profile, course: editCourse.trim(), year: editYear.trim() });
-    } catch (err) {
-      console.error("Failed to update profile", err);
-    }
-    setIsUpdating(false);
-  };
-
-  const handleAddActivity = async (e: React.FormEvent) => {
+  // 2. Submit Verification Form
+  const handleSubmitVerification = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user || !profile || !newActivity.trim()) return;
-    try {
-      const userRef = doc(db, "members", user.uid);
-      const updatedActivities = [...profile.activities, newActivity.trim()];
-      await updateDoc(userRef, { activities: updatedActivities });
-      setProfile({ ...profile, activities: updatedActivities });
-      setNewActivity("");
-    } catch (err) {
-      console.error("Failed to add activity", err);
-    }
-  };
+    setIsSubmitting(true);
 
-  const handleDeleteActivity = async (idxToDelete: number) => {
-    if (!user || !profile) return;
     try {
-      const userRef = doc(db, "members", user.uid);
-      const updatedActivities = profile.activities.filter((_, idx) => idx !== idxToDelete);
-      await updateDoc(userRef, { activities: updatedActivities });
-      setProfile({ ...profile, activities: updatedActivities });
-    } catch (err) {
-      console.error("Failed to delete activity", err);
-    }
-  };
+      const targetUid = currentUserUid || `member_${Date.now()}`;
 
-  const handleImageUpload = async (file: File) => {
-    if (!user || !profile) return;
-    setUploadingImage(true);
-    try {
-      const fileRef = ref(storage, `member_avatars/${user.uid}_${Date.now()}`);
-      const uploadTask = uploadBytesResumable(fileRef, file);
-
-      uploadTask.on(
-        "state_changed",
-        null,
-        (error) => console.error("Upload error", error),
-        async () => {
-          const downloadUrl = await getDownloadURL(uploadTask.snapshot.ref);
-          const userRef = doc(db, "members", user.uid);
-          await updateDoc(userRef, { photoURL: downloadUrl });
-          setProfile({ ...profile, photoURL: downloadUrl });
-          setUploadingImage(false);
-        }
+      // 1. Update/set Firestore status to "Pending"
+      await setDoc(
+        doc(db, "members", targetUid),
+        {
+          uid: targetUid,
+          displayName: verifyName.trim(),
+          email: verifyEmail.trim(),
+          year: verifyYear,
+          status: "Pending",
+          appliedAt: new Date().toISOString(),
+        },
+        { merge: true }
       );
+
+      // 2. Dispatch instructions directly to the user's email via Brevo route
+      try {
+        await fetch("/api/send-verification", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: verifyName.trim(),
+            email: verifyEmail.trim(),
+            year: verifyYear,
+          }),
+        });
+      } catch (mailErr) {
+        console.warn("Mail route ping issue:", mailErr);
+      }
+
+      setVerificationSubmitted(true);
     } catch (err) {
-      console.error(err);
-      setUploadingImage(false);
+      console.error("Verification submit error:", err);
+      alert("Failed to submit verification. Please check your connection.");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   return (
-    <section id="membership-section" className="py-14 bg-slate-50 min-h-screen">
+    <section id="membership-section" className="py-10 bg-slate-50 min-h-screen">
       <div className="max-w-7xl mx-auto px-4 sm:px-6">
         
-        {/* Header & Navigation */}
-        <div className="flex flex-col md:flex-row md:items-end justify-between mb-10 gap-6">
+        {/* Section Header */}
+        <div className="mb-8 border-b border-slate-200 pb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider text-emerald-800 bg-emerald-100 border border-emerald-200">
               <Users className="h-3.5 w-3.5 text-emerald-700" />
@@ -211,270 +173,282 @@ export default function MembershipSection() {
             <h2 className="text-3xl sm:text-4xl font-extrabold text-slate-900 mt-3">
               Membership Portal
             </h2>
-            <p className="mt-2 text-sm sm:text-base text-slate-600 max-w-xl">
-              Access the official registry of DEKUWEC students, log your environmental activities, and manage your membership profile.
+            <p className="mt-1.5 text-sm sm:text-base text-slate-600 max-w-2xl">
+              Official verified roster and enrollment pipeline for Dedan Kimathi Wildlife & Environmental Club members.
             </p>
           </div>
 
-          <div className="flex bg-slate-200/80 p-1.5 rounded-2xl flex-shrink-0">
+          <button
+            onClick={() => router.push("/account")}
+            className="self-start md:self-auto px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition flex items-center gap-2"
+          >
+            <User className="h-4 w-4" />
+            <span>My Account Dashboard</span>
+          </button>
+        </div>
+
+        {/* ===================== GATE QUESTION BANNER ===================== */}
+        <div className="mb-8 p-6 rounded-3xl bg-gradient-to-r from-emerald-900 to-emerald-950 text-white border border-emerald-800/80 shadow-md flex flex-col md:flex-row md:items-center justify-between gap-6">
+          <div>
+            <h3 className="text-lg sm:text-xl font-black flex items-center gap-2">
+              <ShieldCheck className="h-5 w-5 text-emerald-400" />
+              Are you a registered DEKUWEC member?
+            </h3>
+            <p className="text-xs sm:text-sm text-emerald-200/90 mt-1 max-w-xl leading-relaxed">
+              Verify your enrollment status or submit your credentials for official club roster inclusion.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-3 shrink-0">
             <button
-              onClick={() => setActiveTab("directory")}
-              className={`flex items-center gap-2 py-2 px-4 rounded-xl text-sm font-bold transition ${
-                activeTab === "directory" ? "bg-white text-emerald-800 shadow-sm" : "text-slate-600 hover:text-slate-900"
-              }`}
+              onClick={() => setShowYesModal(true)}
+              className="px-6 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-sm shadow-sm transition hover:scale-[1.02]"
             >
-              <Users className="h-4 w-4" />
-              Public Board
+              Yes, I am
             </button>
             <button
               onClick={() => {
-                if (!user) handleGoogleLogin();
-                else setActiveTab("profile");
+                setVerifyName("");
+                setVerifyEmail(currentUserEmail || "");
+                setVerifyYear("Year 1");
+                setVerificationSubmitted(false);
+                setShowVerifyModal(true);
               }}
-              className={`flex items-center gap-2 py-2 px-4 rounded-xl text-sm font-bold transition ${
-                activeTab === "profile" ? "bg-white text-emerald-800 shadow-sm" : "text-slate-600 hover:text-slate-900"
-              }`}
+              className="px-6 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/20 font-bold text-sm transition"
             >
-              <UserIcon className="h-4 w-4" />
-              {user ? "My Profile" : "Login / Join"}
+              No, I want to register
             </button>
           </div>
         </div>
 
-        {/* ======================= TAB: PUBLIC DIRECTORY ======================= */}
-        {activeTab === "directory" && (
-          <div className="bg-white rounded-3xl border border-slate-200 shadow-xs overflow-hidden">
-            <div className="bg-emerald-950 p-6 sm:p-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-white">
-              <div>
-                <h3 className="text-xl font-black flex items-center gap-2">
-                  <ShieldCheck className="h-5 w-5 text-emerald-400" />
-                  Official Membership Board
-                </h3>
-                <p className="text-emerald-200 text-xs sm:text-sm mt-1">
-                  Registered participants for the academic year.
-                </p>
-              </div>
-              <div className="bg-emerald-900/60 border border-emerald-700/50 px-4 py-2 rounded-xl text-center">
-                <p className="text-[10px] uppercase font-bold text-emerald-300 tracking-widest">Total Roster</p>
-                <p className="text-2xl font-black">{OFFICIAL_MEMBERS.length + liveApprovedMembers.length}</p>
-              </div>
+        {/* ======================= DIRECTORY BOARD ======================= */}
+        <div className="bg-white rounded-3xl border border-slate-200 shadow-xs overflow-hidden">
+          
+          {/* Board Header & Search */}
+          <div className="bg-emerald-950 p-6 sm:p-8 flex flex-col md:flex-row md:items-center justify-between gap-6 text-white">
+            <div>
+              <h3 className="text-xl sm:text-2xl font-black flex items-center gap-2">
+                <ShieldCheck className="h-6 w-6 text-emerald-400" />
+                Official Membership Board
+              </h3>
+              <p className="text-emerald-200 text-xs sm:text-sm mt-1">
+                A-Z Directory of all {allDirectoryMembers.length} club members.
+              </p>
             </div>
-
-            <div className="p-6 sm:p-8">
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                
-                {/* Dynamically Approved Firebase Members */}
-                {liveApprovedMembers.map((member) => (
-                  <div key={member.uid} className="flex items-center gap-3 p-3 rounded-2xl border border-slate-100 hover:border-emerald-200 bg-slate-50 transition group">
-                    {member.photoURL ? (
-                      <img src={member.photoURL} alt={member.displayName} className="h-10 w-10 rounded-full object-cover shadow-sm" />
-                    ) : (
-                      <div className="h-10 w-10 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold">
-                        {member.displayName.charAt(0)}
-                      </div>
-                    )}
-                    <div className="min-w-0">
-                      <p className="font-bold text-slate-800 text-sm truncate group-hover:text-emerald-700 transition">
-                        {member.displayName}
-                      </p>
-                      {member.course && (
-                        <p className="text-[10px] text-slate-500 truncate">{member.course}</p>
-                      )}
-                    </div>
-                  </div>
-                ))}
-
-                {/* Legacy Official Array Members */}
-                {OFFICIAL_MEMBERS.map((name, index) => (
-                  <div key={index} className="flex items-center gap-3 p-3 rounded-2xl border border-slate-100 hover:border-emerald-200 bg-slate-50 transition group">
-                    <div className="h-10 w-10 rounded-full bg-slate-200 text-slate-500 flex items-center justify-center font-bold text-sm">
-                      {name.charAt(0)}
-                    </div>
-                    <div className="min-w-0">
-                      <p className="font-bold text-slate-800 text-sm truncate group-hover:text-emerald-700 transition">
-                        {name}
-                      </p>
-                      <p className="text-[10px] text-slate-400">Registered</p>
-                    </div>
-                  </div>
-                ))}
-
-              </div>
+            
+            <div className="relative w-full md:w-64">
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-emerald-400" />
+              <input
+                type="text"
+                placeholder="Search names..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-9 pr-4 py-2 rounded-xl bg-emerald-900 border border-emerald-700 text-sm text-white placeholder-emerald-400/50 outline-none focus:ring-2 focus:ring-emerald-400 transition"
+              />
             </div>
           </div>
-        )}
 
-        {/* ======================= TAB: PERSONAL PROFILE ======================= */}
-        {activeTab === "profile" && (
-          <div className="max-w-4xl mx-auto">
-            {!user || !profile ? (
-              <div className="bg-white rounded-3xl border border-slate-200 p-12 text-center shadow-xs">
-                <div className="h-16 w-16 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <UserIcon className="h-8 w-8" />
-                </div>
-                <h3 className="text-2xl font-black text-slate-900">Student Login Required</h3>
-                <p className="text-slate-500 mt-2 max-w-md mx-auto mb-8 text-sm">
-                  Sign in using your Google account or university email to view your status, update records, and log activities.
-                </p>
-                <button
-                  onClick={handleGoogleLogin}
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-8 py-3.5 rounded-xl shadow-lg transition"
-                >
-                  Continue with Google
-                </button>
-              </div>
-            ) : (
-              <div className="space-y-6">
-                
-                {/* Profile Header Card */}
-                <div className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-xs relative overflow-hidden">
-                  <div className="absolute top-0 right-0 p-6">
-                    <button onClick={handleLogout} className="text-xs text-rose-500 hover:text-rose-600 flex items-center gap-1.5 font-semibold bg-rose-50 px-3 py-1.5 rounded-lg transition">
-                      <LogOut className="h-3.5 w-3.5" />
-                      Sign Out
-                    </button>
-                  </div>
-
-                  <div className="flex flex-col sm:flex-row items-center sm:items-start gap-6 relative z-10 mt-6 sm:mt-0">
-                    
-                    {/* Avatar Upload */}
-                    <div className="relative group">
-                      <div className="h-28 w-28 rounded-full border-4 border-white shadow-md overflow-hidden bg-slate-100 flex-shrink-0">
-                        {profile.photoURL ? (
-                          <img src={profile.photoURL} alt="Profile" className="h-full w-full object-cover" />
-                        ) : (
-                          <div className="h-full w-full flex items-center justify-center bg-emerald-100 text-emerald-700 text-3xl font-black">
-                            {profile.displayName.charAt(0)}
-                          </div>
-                        )}
+          {/* Members Grid */}
+          <div className="p-6 sm:p-8 max-h-[650px] overflow-y-auto">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {allDirectoryMembers.map((member) => {
+                const isApproved = member.status === "Approved";
+                return (
+                  <div 
+                    key={member.uid} 
+                    className="flex flex-col p-4 rounded-2xl border border-slate-100 hover:border-emerald-200 hover:shadow-md bg-slate-50 transition group"
+                  >
+                    <div className="flex justify-between items-start mb-3">
+                      <div className="h-12 w-12 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center font-black text-lg ring-2 ring-white">
+                        {(member.displayName || "?").charAt(0).toUpperCase()}
                       </div>
-                      <label className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 text-white opacity-0 group-hover:opacity-100 rounded-full cursor-pointer transition-opacity backdrop-blur-xs">
-                        <UploadCloud className="h-6 w-6 mb-1" />
-                        <span className="text-[10px] font-bold uppercase">{uploadingImage ? "Wait..." : "Upload"}</span>
-                        <input type="file" accept="image/*" className="hidden" onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          if (file) handleImageUpload(file);
-                        }} />
-                      </label>
-                    </div>
-
-                    <div className="text-center sm:text-left flex-1">
-                      <h3 className="text-2xl font-black text-slate-900">{profile.displayName}</h3>
-                      <p className="text-sm text-slate-500 font-medium">{profile.email}</p>
                       
-                      <div className="mt-4 flex flex-wrap justify-center sm:justify-start gap-3">
-                        {profile.status === "Approved" ? (
-                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                            <CheckCircle2 className="h-3.5 w-3.5" /> Approved Member
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200">
-                            <Clock className="h-3.5 w-3.5" /> Pending Admin Approval
-                          </span>
-                        )}
-                      </div>
+                      <span className={`text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded shadow-xs flex items-center gap-1 ${
+                        isApproved 
+                          ? "bg-emerald-500 text-slate-950" 
+                          : "bg-amber-400 text-slate-950 animate-pulse"
+                      }`}>
+                        {isApproved && <CheckCircle2 className="h-3 w-3" />}
+                        {isApproved ? "Approved" : "Pending"}
+                      </span>
                     </div>
+
+                    <p className="font-bold text-slate-900 text-sm truncate group-hover:text-emerald-700 transition">
+                      {member.displayName || "Unknown Member"}
+                    </p>
+                    <p className="text-[11px] text-slate-500 truncate mt-0.5">
+                      {member.course || "Club Member"} {member.year ? `• ${member.year}` : ""}
+                    </p>
+                  </div>
+                );
+              })}
+
+              {allDirectoryMembers.length === 0 && (
+                <p className="col-span-full py-12 text-center text-slate-400 text-sm font-semibold">
+                  No members found matching "{searchQuery}".
+                </p>
+              )}
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+
+      {/* ===================== MODAL 1: SELECT NAME FROM ROSTER ===================== */}
+      {showYesModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-md rounded-3xl p-6 shadow-2xl border border-slate-200">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+              <h4 className="font-black text-slate-900 text-base flex items-center gap-2">
+                <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+                Select Your Name
+              </h4>
+              <button 
+                onClick={() => setShowYesModal(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-500 my-3">
+              Locate your name in the roster to verify your details:
+            </p>
+
+            <div className="max-h-64 overflow-y-auto space-y-1.5 pr-1 border border-slate-100 rounded-2xl p-2 bg-slate-50">
+              {allDirectoryMembers.map((m) => (
+                <button
+                  key={m.uid}
+                  onClick={() => handleSelectName(m.displayName)}
+                  className="w-full text-left px-3.5 py-2.5 rounded-xl bg-white hover:bg-emerald-50 hover:text-emerald-800 text-xs font-bold text-slate-700 transition flex items-center justify-between border border-slate-100"
+                >
+                  <span className="truncate">{m.displayName}</span>
+                  <ChevronRight className="h-4 w-4 text-slate-400 shrink-0" />
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===================== MODAL 2: VERIFICATION FORM (NAME, EMAIL, YEAR ONLY) ===================== */}
+      {showVerifyModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-md rounded-3xl p-6 sm:p-8 shadow-2xl border border-slate-200">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+              <h4 className="font-black text-slate-900 text-base">
+                {verificationSubmitted ? "Application Received" : "Verify as Member"}
+              </h4>
+              <button 
+                onClick={() => setShowVerifyModal(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {!verificationSubmitted ? (
+              <form onSubmit={handleSubmitVerification} className="space-y-4 mt-4">
+                <p className="text-xs text-slate-500">
+                  Please confirm your details below. Payment and verification instructions will be sent to your email.
+                </p>
+
+                <div>
+                  <label className="block text-[11px] font-bold uppercase text-slate-600 mb-1">
+                    Full Official Name
+                  </label>
+                  <div className="relative">
+                    <User className="absolute left-3.5 top-3 h-4 w-4 text-slate-400" />
+                    <input
+                      type="text"
+                      required
+                      value={verifyName}
+                      onChange={(e) => setVerifyName(e.target.value)}
+                      placeholder="e.g. Kelvin Maina"
+                      className="w-full pl-10 pr-3.5 py-2.5 rounded-xl border border-slate-200 text-sm focus:ring-2 focus:ring-emerald-500 outline-none text-slate-900"
+                    />
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {/* Academic Details Form */}
-                  <div className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-xs">
-                    <h4 className="font-bold text-slate-900 mb-5 flex items-center gap-2 border-b border-slate-100 pb-3">
-                      <GraduationCap className="h-5 w-5 text-emerald-600" />
-                      Academic Profile
-                    </h4>
-                    
-                    <div className="space-y-4">
-                      <div>
-                        <label className="block text-xs font-bold uppercase text-slate-500 mb-1.5">Course / Degree</label>
-                        <div className="relative">
-                          <BookOpen className="absolute left-3.5 top-3 h-4 w-4 text-slate-400" />
-                          <input
-                            type="text"
-                            value={editCourse}
-                            onChange={(e) => setEditCourse(e.target.value)}
-                            placeholder="e.g. B.Sc. Mechanical Engineering"
-                            className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
-                          />
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="block text-xs font-bold uppercase text-slate-500 mb-1.5">Year of Study</label>
-                        <select
-                          value={editYear}
-                          onChange={(e) => setEditYear(e.target.value)}
-                          className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:ring-2 focus:ring-emerald-500 outline-none bg-white"
-                        >
-                          <option value="">Select Year...</option>
-                          <option value="Year 1">Year 1</option>
-                          <option value="Year 2">Year 2</option>
-                          <option value="Year 3">Year 3</option>
-                          <option value="Year 4">Year 4</option>
-                          <option value="Year 5">Year 5</option>
-                        </select>
-                      </div>
-
-                      <button
-                        onClick={handleUpdateProfile}
-                        disabled={isUpdating}
-                        className="w-full py-3 mt-2 bg-slate-900 hover:bg-emerald-700 text-white rounded-xl text-sm font-bold transition flex justify-center"
-                      >
-                        {isUpdating ? "Saving..." : "Save Details"}
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Activity Log Form */}
-                  <div className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-xs flex flex-col">
-                    <h4 className="font-bold text-slate-900 mb-5 flex items-center gap-2 border-b border-slate-100 pb-3">
-                      <Activity className="h-5 w-5 text-emerald-600" />
-                      My Event Log
-                    </h4>
-
-                    <form onSubmit={handleAddActivity} className="flex gap-2 mb-4">
-                      <input
-                        type="text"
-                        value={newActivity}
-                        onChange={(e) => setNewActivity(e.target.value)}
-                        placeholder="e.g. Aberdare Hike, Tree Planting..."
-                        className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
-                      />
-                      <button type="submit" className="bg-emerald-100 hover:bg-emerald-200 text-emerald-800 px-4 rounded-xl transition">
-                        <Plus className="h-5 w-5" />
-                      </button>
-                    </form>
-
-                    <div className="flex-1 overflow-y-auto max-h-[200px] pr-1 space-y-2">
-                      {profile.activities.length === 0 ? (
-                        <div className="text-center py-6 text-slate-400 text-xs flex flex-col items-center">
-                          <AlertCircle className="h-6 w-6 mb-2 opacity-50" />
-                          No activities logged yet.
-                        </div>
-                      ) : (
-                        profile.activities.map((act, idx) => (
-                          <div key={idx} className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-100 group">
-                            <span className="text-sm font-medium text-slate-700">{act}</span>
-                            <button
-                              onClick={() => handleDeleteActivity(idx)}
-                              className="text-slate-400 hover:text-rose-500 transition opacity-0 group-hover:opacity-100"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
-                          </div>
-                        ))
-                      )}
-                    </div>
+                <div>
+                  <label className="block text-[11px] font-bold uppercase text-slate-600 mb-1">
+                    Email Address
+                  </label>
+                  <div className="relative">
+                    <Mail className="absolute left-3.5 top-3 h-4 w-4 text-slate-400" />
+                    <input
+                      type="email"
+                      required
+                      value={verifyEmail}
+                      onChange={(e) => setVerifyEmail(e.target.value)}
+                      placeholder="student@dkut.ac.ke"
+                      className="w-full pl-10 pr-3.5 py-2.5 rounded-xl border border-slate-200 text-sm focus:ring-2 focus:ring-emerald-500 outline-none text-slate-900"
+                    />
                   </div>
                 </div>
 
+                <div>
+                  <label className="block text-[11px] font-bold uppercase text-slate-600 mb-1">
+                    Year of Study
+                  </label>
+                  <div className="relative">
+                    <GraduationCap className="absolute left-3.5 top-3 h-4 w-4 text-slate-400 pointer-events-none" />
+                    <select
+                      value={verifyYear}
+                      onChange={(e) => setVerifyYear(e.target.value)}
+                      className="w-full pl-10 pr-3.5 py-2.5 rounded-xl border border-slate-200 text-sm bg-white outline-none focus:ring-2 focus:ring-emerald-500 text-slate-900 appearance-none"
+                    >
+                      <option value="Year 1">Year 1</option>
+                      <option value="Year 2">Year 2</option>
+                      <option value="Year 3">Year 3</option>
+                      <option value="Year 4">Year 4</option>
+                      <option value="Year 5">Year 5</option>
+                    </select>
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="w-full py-3 mt-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-sm rounded-xl transition shadow-md flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  {isSubmitting ? "Submitting..." : (
+                    <>
+                      <Send className="h-4 w-4" />
+                      <span>Submit Verification</span>
+                    </>
+                  )}
+                </button>
+              </form>
+            ) : (
+              <div className="mt-4 space-y-4">
+                <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs leading-relaxed space-y-2">
+                  <div className="flex items-center gap-2 text-amber-800 font-extrabold text-sm">
+                    <Clock className="h-5 w-5 text-amber-600 shrink-0" />
+                    <span>Status: Pending Approval</span>
+                  </div>
+                  <p>
+                    Your verification request has been received. Payment and verification steps have been sent to <strong>{verifyEmail}</strong>.
+                  </p>
+                </div>
+
+                <button
+                  onClick={() => {
+                    setShowVerifyModal(false);
+                    router.push("/account");
+                  }}
+                  className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-2"
+                >
+                  <User className="h-3.5 w-3.5" />
+                  <span>Go to My Account Dashboard</span>
+                </button>
               </div>
             )}
           </div>
-        )}
+        </div>
+      )}
 
-      </div>
     </section>
   );
 }

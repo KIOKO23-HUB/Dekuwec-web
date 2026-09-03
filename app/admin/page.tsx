@@ -12,7 +12,8 @@ import {
   onSnapshot, 
   query, 
   orderBy, 
-  serverTimestamp 
+  serverTimestamp,
+  updateDoc
 } from "firebase/firestore";
 import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 import { 
@@ -22,7 +23,6 @@ import {
   CalendarPlus, 
   HelpCircle, 
   Camera, 
-  MessageSquare, 
   Send, 
   CheckCircle2, 
   AlertCircle, 
@@ -31,18 +31,31 @@ import {
   Trash2,
   UploadCloud,
   Globe2,
-  ExternalLink,
-  Flame,
-  Plus
+  Plus,
+  Users,
+  Clock,
+  UserCheck,
+  UserX,
+  Bell,
+  Sparkles,
+  Copy,
+  Check,
+  PhoneCall,
+  Image as ImageIcon
 } from "lucide-react";
+
+const CLUB_LOGO_URL = "https://i.postimg.cc/HLsfSHMm/Whats-App-Image-2026-09-03-at-09-49-04.jpg";
+const DEKUT_LOGO_URL = "https://i.postimg.cc/Xq84V1xK/Dekut-logo.jpg";
 
 export default function AdminDashboard() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [passkey, setPasskey] = useState("");
   const [authError, setAuthError] = useState(false);
 
-  // Tab state: 'events' | 'discussions' | 'quiz' | 'snaps'
-  const [adminTab, setAdminTab] = useState<"events" | "discussions" | "quiz" | "snaps">("events");
+  // Tab state
+  const [adminTab, setAdminTab] = useState<
+    "members" | "notifications" | "ai-poster" | "events" | "discussions" | "quiz" | "snaps"
+  >("members");
 
   // Global states
   const [loading, setLoading] = useState(false);
@@ -51,11 +64,34 @@ export default function AdminDashboard() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   // --- Realtime Data Stores ---
+  const [allUsersList, setAllUsersList] = useState<any[]>([]);
   const [eventsList, setEventsList] = useState<any[]>([]);
   const [discussionsList, setDiscussionsList] = useState<any[]>([]);
   const [snapsList, setSnapsList] = useState<any[]>([]);
 
-  // --- Form 1: Event Fields ---
+  // --- Push Notifications Form ---
+  const [notifTitle, setNotifTitle] = useState("");
+  const [notifMessage, setNotifMessage] = useState("");
+  const [notifImageUrl, setNotifImageUrl] = useState("");
+  const [sendToEmail, setSendToEmail] = useState(true);
+
+  // --- PR Poster AI Studio State ---
+  const [templateImgUrl, setTemplateImgUrl] = useState("");
+  const [bgImgUrl, setBgImgUrl] = useState("");
+  const [noUploadsConfirmed, setNoUploadsConfirmed] = useState(false);
+  const [posterDetails, setPosterDetails] = useState({
+    title: "",
+    theme: "",
+    date: "",
+    time: "",
+    venue: "",
+    chiefGuest: "",
+    customNotes: "",
+  });
+  const [generatedPrompt, setGeneratedPrompt] = useState("");
+  const [copiedPrompt, setCopiedPrompt] = useState(false);
+
+  // --- Events State ---
   const [eventTitle, setEventTitle] = useState("");
   const [eventStatement, setEventStatement] = useState("");
   const [eventDate, setEventDate] = useState("");
@@ -64,13 +100,13 @@ export default function AdminDashboard() {
   const [eventType, setEventType] = useState<"upcoming" | "previous">("upcoming");
   const [eventLink, setEventLink] = useState("");
 
-  // --- Form 2: Multi-Feed Discussions / Global Affairs ---
+  // --- Discussions State ---
   const [discTitle, setDiscTitle] = useState("");
   const [discCategory, setDiscCategory] = useState<"Kenya" | "Global" | "Campus" | "Debate">("Debate");
   const [discPrompt, setDiscPrompt] = useState("");
   const [discMeetingInfo, setDiscMeetingInfo] = useState("Wednesday • 4:00 PM • Resource Centre");
 
-  // --- Form 3: EcoPulse Quiz ---
+  // --- Quiz State ---
   const [quizWeek, setQuizWeek] = useState("Week 5");
   const [quizQuestion, setQuizQuestion] = useState("");
   const [optA, setOptA] = useState("");
@@ -80,7 +116,7 @@ export default function AdminDashboard() {
   const [correctIndex, setCorrectIndex] = useState(0);
   const [explanation, setExplanation] = useState("");
 
-  // --- Form 4: Nature Snap Winner ---
+  // --- Nature Snap State ---
   const [snapTitle, setSnapTitle] = useState("");
   const [photographer, setPhotographer] = useState("");
   const [snapWeek, setSnapWeek] = useState("Week 5 Winner");
@@ -105,6 +141,11 @@ export default function AdminDashboard() {
   useEffect(() => {
     if (!isAuthenticated) return;
 
+    // Listen to All Members / Signups
+    const unsubMembers = onSnapshot(collection(db, "members"), (snapshot) => {
+      setAllUsersList(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
+    });
+
     // Listen to Events
     const qEvents = query(collection(db, "events"), orderBy("createdAt", "desc"));
     const unsubEvents = onSnapshot(qEvents, (snapshot) => {
@@ -124,17 +165,31 @@ export default function AdminDashboard() {
     });
 
     return () => {
+      unsubMembers();
       unsubEvents();
       unsubDisc();
       unsubSnaps();
     };
   }, [isAuthenticated]);
 
-  // Generic Image Uploader to Firebase Storage
-  const handleImageUpload = async (
-    file: File, 
-    setUrlCallback: (url: string) => void
-  ) => {
+  // Member Categorization
+  const registeredApproved = allUsersList.filter((m) => m.status === "Approved");
+  const pendingApprovals = allUsersList.filter((m) => m.status === "Pending");
+  const generalSignups = allUsersList.filter((m) => m.status === "Unregistered" || !m.status);
+
+  // Status Modifiers
+  const handleSetStatus = async (uid: string, newStatus: "Approved" | "Pending" | "Unregistered") => {
+    try {
+      await updateDoc(doc(db, "members", uid), { status: newStatus });
+      setSuccessMsg(`Member status updated to: ${newStatus}`);
+      setTimeout(() => setSuccessMsg(null), 3000);
+    } catch (err: any) {
+      setErrorMsg("Failed to update status: " + err.message);
+    }
+  };
+
+  // Generic Image Uploader
+  const handleImageUpload = async (file: File, setUrlCallback: (url: string) => void) => {
     if (!file) return;
     setUploadingImage(true);
     setErrorMsg(null);
@@ -155,7 +210,7 @@ export default function AdminDashboard() {
           const downloadUrl = await getDownloadURL(uploadTask.snapshot.ref);
           setUrlCallback(downloadUrl);
           setUploadingImage(false);
-          setSuccessMsg("Image uploaded successfully from device!");
+          setSuccessMsg("Image uploaded successfully!");
         }
       );
     } catch (err: any) {
@@ -164,19 +219,90 @@ export default function AdminDashboard() {
     }
   };
 
-  // --- ACTIONS: ADD & DELETE ---
+  // Broadcast Push Notification (Website + Email)
+  const handleSendBroadcast = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
 
-  // Event: Save
+    try {
+      const targetEmails = allUsersList.map((u) => u.email).filter(Boolean);
+
+      const res = await fetch("/api/admin/broadcast", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: notifTitle,
+          message: notifMessage,
+          imageUrl: notifImageUrl,
+          targetEmails,
+          sendEmail: sendToEmail,
+        }),
+      });
+
+      if (!res.ok) throw new Error("Failed to send notification.");
+
+      setSuccessMsg("Notification successfully broadcasted to website and member emails!");
+      setNotifTitle("");
+      setNotifMessage("");
+      setNotifImageUrl("");
+    } catch (err: any) {
+      setErrorMsg(err.message || "Broadcast dispatch failed.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Generate PR AI Poster Prompt
+  const handleGeneratePosterPrompt = (e: React.FormEvent) => {
+    e.preventDefault();
+
+    const promptText = `
+Create an ultra-high-resolution, visually striking environmental event poster that matches the composition, typography layout, and visual rhythm of the reference template: ${
+      templateImgUrl || "Standard Modern Conservation Expedition Layout"
+    }.
+
+CRITICAL DESIGN SPECIFICATIONS (DO NOT USE ANY ORIGINAL DUMMY DETAILS FROM THE TEMPLATE):
+1. MANDATORY EMBEDDED LOGOS:
+   - DEKUWEC Official Club Logo (Top Left Corner): ${CLUB_LOGO_URL}
+   - Dedan Kimathi University of Technology (DeKUT) Crest (Top Right Corner): ${DEKUT_LOGO_URL}
+
+2. BACKGROUND ARTWORK:
+   ${
+     bgImgUrl
+       ? `- Instate this background image seamlessly across the composition: ${bgImgUrl}`
+       : "- Utilize a majestic Kenyan landscape backdrop (Aberdare Forest, Mount Kenya peaks, or rich bamboo canopies) with clean cinematic lighting."
+   }
+
+3. EVENT PARTICULARS & TYPOGRAPHY:
+   - Primary Headline: "${posterDetails.title || "DEKUWEC EXPEDITION 2026"}"
+   - Event Theme/Subtitle: "${posterDetails.theme || "Conservation • Exploration • Sustainability"}"
+   - Scheduled Date: "${posterDetails.date || "To Be Announced"}"
+   - Start Time: "${posterDetails.time || "8:00 AM EAT"}"
+   - Venue / Route: "${posterDetails.venue || "DeKUT Main Campus, Nyeri"}"
+   ${posterDetails.chiefGuest ? `- Chief Guest / Host: "${posterDetails.chiefGuest}"` : ""}
+   ${posterDetails.customNotes ? `- Crucial Notice: "${posterDetails.customNotes}"` : ""}
+
+4. MANDATORY FOOTER CONTACT & REAL SOCIAL ICONS:
+   Position clean, modern vector social icons along the bottom footer banner:
+   - [Instagram Icon] @dekut_wec
+   - [X / Twitter Icon] @Dekut_WEC
+   - [TikTok Icon] @dekut_wec
+   - [WhatsApp Icon] 0758638953
+   - Call to Action: "Join the Green Movement • Register at dekuwec-web.firebaseapp.com"
+
+STYLE: Professional graphic design, bold modern typography, high contrast, clean readable layout, suitable for official campus distribution.
+    `.trim();
+
+    setGeneratedPrompt(promptText);
+  };
+
+  // --- STANDARD HANDLERS (Events, Snaps, Quizzes, Discussions) ---
   const handleSaveEvent = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!eventImageUrl) {
-      setErrorMsg("Please upload or provide an image URL.");
-      return;
-    }
+    if (!eventImageUrl) return setErrorMsg("Please upload an event poster.");
     setLoading(true);
-    setSuccessMsg(null);
-    setErrorMsg(null);
-
     try {
       await addDoc(collection(db, "events"), {
         title: eventTitle.trim(),
@@ -188,38 +314,22 @@ export default function AdminDashboard() {
         externalLink: eventLink.trim() || null,
         createdAt: serverTimestamp(),
       });
-      setSuccessMsg("Event added to live site!");
-      setEventTitle("");
-      setEventStatement("");
-      setEventDate("");
-      setEventVenue("");
-      setEventImageUrl("");
-      setEventLink("");
+      setSuccessMsg("Event published!");
+      setEventTitle(""); setEventStatement(""); setEventDate(""); setEventVenue(""); setEventImageUrl(""); setEventLink("");
     } catch (err: any) {
-      setErrorMsg(err.message || "Failed to save event");
+      setErrorMsg(err.message);
     } finally {
       setLoading(false);
     }
   };
 
-  // Event: Delete
   const handleDeleteEvent = async (id: string) => {
-    if (!confirm("Are you sure you want to remove this event from the website?")) return;
-    try {
-      await deleteDoc(doc(db, "events", id));
-      setSuccessMsg("Event deleted.");
-    } catch (err: any) {
-      setErrorMsg("Failed to delete event.");
-    }
+    if (confirm("Delete this event?")) await deleteDoc(doc(db, "events", id));
   };
 
-  // Discussion / News Item: Save
   const handleSaveDiscussion = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    setSuccessMsg(null);
-    setErrorMsg(null);
-
     try {
       await addDoc(collection(db, "discussions_feed"), {
         title: discTitle.trim(),
@@ -228,38 +338,23 @@ export default function AdminDashboard() {
         meetingInfo: discMeetingInfo.trim(),
         createdAt: serverTimestamp(),
       });
-      setSuccessMsg("New discussion/news item added to the feed!");
-      setDiscTitle("");
-      setDiscPrompt("");
+      setSuccessMsg("Discussion posted!");
+      setDiscTitle(""); setDiscPrompt("");
     } catch (err: any) {
-      setErrorMsg(err.message || "Failed to post item");
+      setErrorMsg(err.message);
     } finally {
       setLoading(false);
     }
   };
 
-  // Discussion: Delete
   const handleDeleteDiscussion = async (id: string) => {
-    if (!confirm("Delete this feed topic?")) return;
-    try {
-      await deleteDoc(doc(db, "discussions_feed", id));
-      setSuccessMsg("Topic removed from feed.");
-    } catch (err: any) {
-      setErrorMsg("Failed to delete topic.");
-    }
+    if (confirm("Delete this topic?")) await deleteDoc(doc(db, "discussions_feed", id));
   };
 
-  // Nature Snap: Save
   const handleSaveSnap = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!snapImageUrl) {
-      setErrorMsg("Please upload a winning photograph.");
-      return;
-    }
+    if (!snapImageUrl) return setErrorMsg("Please upload a photo.");
     setLoading(true);
-    setSuccessMsg(null);
-    setErrorMsg(null);
-
     try {
       await addDoc(collection(db, "nature_snaps"), {
         title: snapTitle.trim(),
@@ -271,37 +366,22 @@ export default function AdminDashboard() {
         cameraInfo: cameraInfo.trim() || null,
         createdAt: serverTimestamp(),
       });
-      setSuccessMsg("Awarded snap published!");
-      setSnapTitle("");
-      setPhotographer("");
-      setSnapLocation("");
-      setSnapImageUrl("");
-      setCameraInfo("");
+      setSuccessMsg("Winning photo featured!");
+      setSnapTitle(""); setPhotographer(""); setSnapLocation(""); setSnapImageUrl(""); setCameraInfo("");
     } catch (err: any) {
-      setErrorMsg(err.message || "Failed to save snap");
+      setErrorMsg(err.message);
     } finally {
       setLoading(false);
     }
   };
 
-  // Nature Snap: Delete
   const handleDeleteSnap = async (id: string) => {
-    if (!confirm("Delete this photo from Nature Snaps?")) return;
-    try {
-      await deleteDoc(doc(db, "nature_snaps", id));
-      setSuccessMsg("Photo removed from gallery.");
-    } catch (err: any) {
-      setErrorMsg("Failed to delete photo.");
-    }
+    if (confirm("Delete this photo?")) await deleteDoc(doc(db, "nature_snaps", id));
   };
 
-  // Quiz: Save
   const handleSaveQuiz = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    setSuccessMsg(null);
-    setErrorMsg(null);
-
     try {
       await addDoc(collection(db, "weekly_quizzes"), {
         weekNumber: quizWeek.trim(),
@@ -312,15 +392,10 @@ export default function AdminDashboard() {
         active: true,
         createdAt: serverTimestamp(),
       });
-      setSuccessMsg("Weekly quiz updated!");
-      setQuizQuestion("");
-      setOptA("");
-      setOptB("");
-      setOptC("");
-      setOptD("");
-      setExplanation("");
+      setSuccessMsg("Weekly quiz posted!");
+      setQuizQuestion(""); setOptA(""); setOptB(""); setOptC(""); setOptD(""); setExplanation("");
     } catch (err: any) {
-      setErrorMsg(err.message || "Failed to update quiz");
+      setErrorMsg(err.message);
     } finally {
       setLoading(false);
     }
@@ -376,9 +451,8 @@ export default function AdminDashboard() {
     );
   }
 
-  // ==================== DASHBOARD VIEW ====================
   return (
-    <div className="min-h-screen bg-slate-100 text-slate-900 flex flex-col">
+    <div className="min-h-screen bg-slate-100 text-slate-900 flex flex-col font-sans">
       {/* Header */}
       <header className="bg-emerald-950 text-white border-b border-emerald-900 px-6 py-4 sticky top-0 z-40">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
@@ -388,7 +462,7 @@ export default function AdminDashboard() {
             </div>
             <div>
               <h2 className="font-bold text-sm sm:text-base leading-none">DEKUWEC Executive Desk</h2>
-              <span className="text-[11px] text-emerald-300">Live Database Controller</span>
+              <span className="text-[11px] text-emerald-300">Club Operations & PR Engine</span>
             </div>
           </div>
 
@@ -410,43 +484,72 @@ export default function AdminDashboard() {
       </header>
 
       {/* Main Container */}
-      <main className="max-w-6xl mx-auto px-4 sm:px-6 py-8 w-full flex-grow">
-        
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8 w-full flex-grow">
         {/* Navigation Tabs */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-slate-200/90 p-1.5 rounded-2xl mb-8">
+        <div className="flex flex-wrap gap-2 bg-slate-200/90 p-1.5 rounded-2xl mb-8">
           <button
-            onClick={() => { setAdminTab("events"); setSuccessMsg(null); setErrorMsg(null); }}
-            className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold transition ${
+            onClick={() => setAdminTab("members")}
+            className={`flex items-center gap-2 py-2 px-3.5 rounded-xl text-xs sm:text-sm font-bold transition ${
+              adminTab === "members" ? "bg-white text-emerald-800 shadow-sm" : "text-slate-600 hover:text-slate-900"
+            }`}
+          >
+            <Users className="h-4 w-4" />
+            <span>Members & Approvals ({allUsersList.length})</span>
+          </button>
+
+          <button
+            onClick={() => setAdminTab("notifications")}
+            className={`flex items-center gap-2 py-2 px-3.5 rounded-xl text-xs sm:text-sm font-bold transition ${
+              adminTab === "notifications" ? "bg-white text-emerald-800 shadow-sm" : "text-slate-600 hover:text-slate-900"
+            }`}
+          >
+            <Bell className="h-4 w-4" />
+            <span>Push Notifications</span>
+          </button>
+
+          <button
+            onClick={() => setAdminTab("ai-poster")}
+            className={`flex items-center gap-2 py-2 px-3.5 rounded-xl text-xs sm:text-sm font-bold transition ${
+              adminTab === "ai-poster" ? "bg-white text-emerald-800 shadow-sm" : "text-slate-600 hover:text-slate-900"
+            }`}
+          >
+            <Sparkles className="h-4 w-4 text-amber-500" />
+            <span>PR AI Poster Studio</span>
+          </button>
+
+          <button
+            onClick={() => setAdminTab("events")}
+            className={`flex items-center gap-2 py-2 px-3.5 rounded-xl text-xs sm:text-sm font-bold transition ${
               adminTab === "events" ? "bg-white text-emerald-800 shadow-sm" : "text-slate-600 hover:text-slate-900"
             }`}
           >
             <CalendarPlus className="h-4 w-4" />
-            <span>Manage Events ({eventsList.length})</span>
+            <span>Events ({eventsList.length})</span>
           </button>
 
           <button
-            onClick={() => { setAdminTab("discussions"); setSuccessMsg(null); setErrorMsg(null); }}
-            className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold transition ${
+            onClick={() => setAdminTab("discussions")}
+            className={`flex items-center gap-2 py-2 px-3.5 rounded-xl text-xs sm:text-sm font-bold transition ${
               adminTab === "discussions" ? "bg-white text-emerald-800 shadow-sm" : "text-slate-600 hover:text-slate-900"
             }`}
           >
             <Globe2 className="h-4 w-4" />
-            <span>Discussions & News Feed</span>
+            <span>Discussions ({discussionsList.length})</span>
           </button>
 
           <button
-            onClick={() => { setAdminTab("snaps"); setSuccessMsg(null); setErrorMsg(null); }}
-            className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold transition ${
+            onClick={() => setAdminTab("snaps")}
+            className={`flex items-center gap-2 py-2 px-3.5 rounded-xl text-xs sm:text-sm font-bold transition ${
               adminTab === "snaps" ? "bg-white text-emerald-800 shadow-sm" : "text-slate-600 hover:text-slate-900"
             }`}
           >
             <Camera className="h-4 w-4" />
-            <span>Nature Snaps ({snapsList.length})</span>
+            <span>Nature Snaps</span>
           </button>
 
           <button
-            onClick={() => { setAdminTab("quiz"); setSuccessMsg(null); setErrorMsg(null); }}
-            className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold transition ${
+            onClick={() => setAdminTab("quiz")}
+            className={`flex items-center gap-2 py-2 px-3.5 rounded-xl text-xs sm:text-sm font-bold transition ${
               adminTab === "quiz" ? "bg-white text-emerald-800 shadow-sm" : "text-slate-600 hover:text-slate-900"
             }`}
           >
@@ -470,10 +573,571 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        {/* ==================== TAB 1: MANAGE EVENTS ==================== */}
+        {/* ==================== TAB 1: MEMBERS, APPROVALS & SIGNUPS ==================== */}
+        {adminTab === "members" && (
+          <div className="space-y-8">
+            {/* List 1: Pending Approvals */}
+            <div className="bg-white rounded-3xl border border-amber-200 shadow-sm p-6 sm:p-8">
+              <div className="flex items-center justify-between pb-4 border-b border-amber-100 mb-6">
+                <div>
+                  <h3 className="text-lg font-black text-amber-900 flex items-center gap-2">
+                    <Clock className="h-5 w-5 text-amber-600" />
+                    Pending Verification & Registration Requests ({pendingApprovals.length})
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Applicants who have submitted verification details and are awaiting admin payment confirmation.
+                  </p>
+                </div>
+                <span className="px-3 py-1 bg-amber-100 text-amber-800 rounded-full font-bold text-xs">
+                  Needs Action
+                </span>
+              </div>
+
+              {pendingApprovals.length === 0 ? (
+                <p className="text-xs text-slate-400 py-6 text-center italic">
+                  No membership verification requests currently pending approval.
+                </p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs text-slate-700">
+                    <thead className="bg-amber-50/50 text-[11px] uppercase tracking-wider text-slate-500 border-b border-amber-100">
+                      <tr>
+                        <th className="py-3 px-4 font-bold">Applicant Name</th>
+                        <th className="py-3 px-4 font-bold">Email</th>
+                        <th className="py-3 px-4 font-bold">Year of Study</th>
+                        <th className="py-3 px-4 font-bold">Applied Date</th>
+                        <th className="py-3 px-4 font-bold text-right">Approval Decision</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {pendingApprovals.map((m) => (
+                        <tr key={m.id} className="hover:bg-amber-50/30 transition">
+                          <td className="py-3.5 px-4 font-bold text-slate-900">{m.displayName}</td>
+                          <td className="py-3.5 px-4 font-mono text-slate-600">{m.email}</td>
+                          <td className="py-3.5 px-4">{m.year || "Year 1"}</td>
+                          <td className="py-3.5 px-4 text-slate-400">
+                            {m.appliedAt ? new Date(m.appliedAt).toLocaleDateString() : "Recent"}
+                          </td>
+                          <td className="py-3.5 px-4 text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              <button
+                                onClick={() => handleSetStatus(m.id, "Approved")}
+                                className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1 transition"
+                              >
+                                <UserCheck className="h-3.5 w-3.5" />
+                                Approve (KES 100 Paid)
+                              </button>
+                              <button
+                                onClick={() => handleSetStatus(m.id, "Unregistered")}
+                                className="px-3 py-1.5 rounded-lg bg-rose-100 hover:bg-rose-200 text-rose-800 font-bold text-xs flex items-center gap-1 transition"
+                              >
+                                <UserX className="h-3.5 w-3.5" />
+                                Reject
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* List 2: Active Registered Members */}
+            <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 sm:p-8">
+              <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-6">
+                <div>
+                  <h3 className="text-lg font-black text-slate-900 flex items-center gap-2">
+                    <ShieldCheck className="h-5 w-5 text-emerald-600" />
+                    Official Registered Members ({registeredApproved.length})
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Confirmed members displaying green verified status across the site directory.
+                  </p>
+                </div>
+                <span className="px-3 py-1 bg-emerald-100 text-emerald-800 rounded-full font-bold text-xs">
+                  Active
+                </span>
+              </div>
+
+              {registeredApproved.length === 0 ? (
+                <p className="text-xs text-slate-400 py-6 text-center italic">
+                  No verified members in database.
+                </p>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                  {registeredApproved.map((m) => (
+                    <div
+                      key={m.id}
+                      className="p-3.5 rounded-2xl border border-slate-100 bg-slate-50 flex items-center justify-between gap-3"
+                    >
+                      <div className="min-w-0">
+                        <p className="font-bold text-slate-900 text-xs truncate">{m.displayName}</p>
+                        <p className="text-[11px] text-slate-500 truncate">{m.email}</p>
+                        <span className="text-[10px] text-emerald-700 font-bold">{m.year || "Year 1"}</span>
+                      </div>
+                      <button
+                        onClick={() => handleSetStatus(m.id, "Unregistered")}
+                        title="Revoke Verification"
+                        className="text-xs text-rose-500 hover:text-rose-700 p-1 font-semibold"
+                      >
+                        Revoke
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* List 3: All Signups on Website */}
+            <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 sm:p-8">
+              <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-6">
+                <div>
+                  <h3 className="text-lg font-black text-slate-900 flex items-center gap-2">
+                    <Users className="h-5 w-5 text-slate-700" />
+                    Complete Signups & Notification Mailing List ({allUsersList.length})
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Every student who has created an account on the portal. All emails are saved for automated push alerts.
+                  </p>
+                </div>
+              </div>
+
+              <div className="max-h-72 overflow-y-auto pr-1">
+                <table className="w-full text-left text-xs text-slate-700">
+                  <thead className="bg-slate-50 text-[10px] uppercase text-slate-400 border-b border-slate-100">
+                    <tr>
+                      <th className="py-2.5 px-3">User</th>
+                      <th className="py-2.5 px-3">Email Address</th>
+                      <th className="py-2.5 px-3">Member Status</th>
+                      <th className="py-2.5 px-3">Signup Date</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {allUsersList.map((u) => (
+                      <tr key={u.id}>
+                        <td className="py-2.5 px-3 font-semibold text-slate-900">{u.displayName || "Anonymous User"}</td>
+                        <td className="py-2.5 px-3 font-mono text-slate-600">{u.email}</td>
+                        <td className="py-2.5 px-3">
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                              u.status === "Approved"
+                                ? "bg-emerald-100 text-emerald-800"
+                                : u.status === "Pending"
+                                ? "bg-amber-100 text-amber-800"
+                                : "bg-slate-200 text-slate-700"
+                            }`}
+                          >
+                            {u.status || "Unregistered"}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 text-slate-400">
+                          {u.createdAt ? new Date(u.createdAt).toLocaleDateString() : "Registered"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ==================== TAB 2: PUSH NOTIFICATIONS ==================== */}
+        {adminTab === "notifications" && (
+          <div className="max-w-3xl mx-auto bg-white rounded-3xl border border-slate-200 p-6 sm:p-10 shadow-xs">
+            <div className="flex items-center gap-3 mb-6 pb-4 border-b border-slate-100">
+              <div className="h-10 w-10 rounded-xl bg-emerald-100 flex items-center justify-center text-emerald-700">
+                <Bell className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="text-xl font-black text-slate-900">Broadcast Member Notification</h3>
+                <p className="text-xs text-slate-500">
+                  Pushes a live notification banner to the website and dispatches an announcement email with images to all {allUsersList.length} registered accounts.
+                </p>
+              </div>
+            </div>
+
+            <form onSubmit={handleSendBroadcast} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold uppercase text-slate-700 mb-1">
+                  Announcement Title
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Mandatory Club Assembly: Trip Logistics"
+                  value={notifTitle}
+                  onChange={(e) => setNotifTitle(e.target.value)}
+                  className="w-full p-2.5 rounded-xl border border-slate-200 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase text-slate-700 mb-1">
+                  Message Body
+                </label>
+                <textarea
+                  rows={4}
+                  required
+                  placeholder="Type the message details, schedule updates, or urgent instructions..."
+                  value={notifMessage}
+                  onChange={(e) => setNotifMessage(e.target.value)}
+                  className="w-full p-2.5 rounded-xl border border-slate-200 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                />
+              </div>
+
+              {/* Image / Poster attachment for emails */}
+              <div>
+                <label className="block text-xs font-bold uppercase text-slate-700 mb-1">
+                  Attach Picture or Poster URL (Included in Email Dispatch)
+                </label>
+                <div className="flex items-center gap-3">
+                  <label className="cursor-pointer flex items-center gap-2 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold border border-slate-300 transition">
+                    <UploadCloud className="h-4 w-4 text-emerald-600" />
+                    <span>{uploadingImage ? "Uploading..." : "Upload Poster"}</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleImageUpload(file, setNotifImageUrl);
+                      }}
+                    />
+                  </label>
+                  <span className="text-xs text-slate-400">or paste direct image link</span>
+                </div>
+                <input
+                  type="url"
+                  placeholder="https://..."
+                  value={notifImageUrl}
+                  onChange={(e) => setNotifImageUrl(e.target.value)}
+                  className="w-full p-2.5 rounded-xl border border-slate-200 text-sm mt-2"
+                />
+                {notifImageUrl && (
+                  <div className="mt-2 h-32 w-full rounded-xl overflow-hidden border border-slate-200 bg-slate-50">
+                    <img src={notifImageUrl} alt="Preview" className="h-full w-full object-cover" />
+                  </div>
+                )}
+              </div>
+
+              <div className="pt-2 flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  id="sendEmailBox"
+                  checked={sendToEmail}
+                  onChange={(e) => setSendToEmail(e.target.checked)}
+                  className="h-4 w-4 text-emerald-600 rounded border-slate-300"
+                />
+                <label htmlFor="sendEmailBox" className="text-xs font-bold text-slate-700 cursor-pointer">
+                  Send directly to all {allUsersList.length} signup emails via Brevo
+                </label>
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading || uploadingImage}
+                className="w-full py-3.5 mt-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm transition flex items-center justify-center gap-2 disabled:opacity-50 shadow-md"
+              >
+                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                <span>Push Notification & Send Emails</span>
+              </button>
+            </form>
+          </div>
+        )}
+
+        {/* ==================== TAB 3: PR AI POSTER STUDIO ==================== */}
+        {adminTab === "ai-poster" && (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+            {/* PR Configuration Form (7 cols) */}
+            <div className="lg:col-span-7 bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-xs space-y-6">
+              <div className="border-b border-slate-100 pb-4">
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
+                  <Sparkles className="h-3 w-3" /> PR Studio Assistant
+                </span>
+                <h3 className="text-xl font-black text-slate-900 mt-1">AI Poster Prompt & Layout Generator</h3>
+                <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
+                  Upload a sample poster to imitate its layout. The generator uses your official club branding and event details instead of the sample's text.
+                </p>
+              </div>
+
+              {/* Step 1: Visual References */}
+              <div className="space-y-4">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                  Step 1: Visual References (Optional)
+                </h4>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* Template To Imitate */}
+                  <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50">
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Sample Poster to Imitate
+                    </label>
+                    <label className="cursor-pointer flex items-center justify-center gap-2 p-3 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 hover:border-emerald-500 transition">
+                      <UploadCloud className="h-4 w-4 text-emerald-600" />
+                      <span>{templateImgUrl ? "Template Loaded" : "Upload Reference"}</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) handleImageUpload(file, setTemplateImgUrl);
+                        }}
+                      />
+                    </label>
+                    {templateImgUrl && (
+                      <p className="text-[10px] text-emerald-700 font-mono mt-1.5 truncate">
+                        {templateImgUrl}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Background Image */}
+                  <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50">
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Poster Background Image
+                    </label>
+                    <label className="cursor-pointer flex items-center justify-center gap-2 p-3 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 hover:border-emerald-500 transition">
+                      <ImageIcon className="h-4 w-4 text-emerald-600" />
+                      <span>{bgImgUrl ? "Background Loaded" : "Upload Background"}</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) handleImageUpload(file, setBgImgUrl);
+                        }}
+                      />
+                    </label>
+                    {bgImgUrl && (
+                      <p className="text-[10px] text-emerald-700 font-mono mt-1.5 truncate">
+                        {bgImgUrl}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {!templateImgUrl && !bgImgUrl && (
+                  <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 flex items-center justify-between">
+                    <span>No reference images uploaded? Generate poster without them:</span>
+                    <button
+                      type="button"
+                      onClick={() => setNoUploadsConfirmed(true)}
+                      className={`px-3 py-1 rounded-lg text-xs font-bold transition ${
+                        noUploadsConfirmed
+                          ? "bg-emerald-600 text-white"
+                          : "bg-amber-200 hover:bg-amber-300 text-amber-950"
+                      }`}
+                    >
+                      {noUploadsConfirmed ? "Confirmed (No Uploads)" : "Proceed Without Them"}
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Step 2: Form Details */}
+              <form onSubmit={handleGeneratePosterPrompt} className="space-y-4 pt-2">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                  Step 2: Club Information to Include
+                </h4>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Event Title / Main Bold Headline *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Aberdare Karuru Waterfalls Expedition"
+                    value={posterDetails.title}
+                    onChange={(e) => setPosterDetails({ ...posterDetails, title: e.target.value })}
+                    className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Theme / Tagline / Statement
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Preserving High Mountain Water Towers for Future Generations"
+                    value={posterDetails.theme}
+                    onChange={(e) => setPosterDetails({ ...posterDetails, theme: e.target.value })}
+                    className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Date of the Event *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Saturday, October 24, 2026"
+                      value={posterDetails.date}
+                      onChange={(e) => setPosterDetails({ ...posterDetails, date: e.target.value })}
+                      className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Time / Departure *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. 6:00 AM Sharp"
+                      value={posterDetails.time}
+                      onChange={(e) => setPosterDetails({ ...posterDetails, time: e.target.value })}
+                      className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Venue / Meeting Point *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. DeKUT Resource Centre Quadrangle"
+                      value={posterDetails.venue}
+                      onChange={(e) => setPosterDetails({ ...posterDetails, venue: e.target.value })}
+                      className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Host / Special Guest (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Hosted by DEKUWEC Executive Committee"
+                      value={posterDetails.chiefGuest}
+                      onChange={(e) => setPosterDetails({ ...posterDetails, chiefGuest: e.target.value })}
+                      className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Other Special Instructions / Pricing / Registration Notes
+                  </label>
+                  <textarea
+                    rows={2}
+                    placeholder="e.g. Registration fee KES 300 (covers park entry & snacks). Open to all students."
+                    value={posterDetails.customNotes}
+                    onChange={(e) => setPosterDetails({ ...posterDetails, customNotes: e.target.value })}
+                    className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
+                  />
+                </div>
+
+                {/* Built-in Assets Reminder Box with native SVG brand icons */}
+                <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-950 space-y-2">
+                  <p className="font-bold flex items-center gap-1.5">
+                    <ShieldCheck className="h-4 w-4 text-emerald-600" />
+                    Branding Assets Automatically Injected:
+                  </p>
+                  <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-700">
+                    <div className="flex items-center gap-1.5">
+                      <img src={CLUB_LOGO_URL} alt="Club" className="h-4 w-4 rounded-full object-cover" />
+                      <span>Official Club Logo</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <img src={DEKUT_LOGO_URL} alt="DeKUT" className="h-4 w-4 rounded-full object-cover" />
+                      <span>DeKUT Crest</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      {/* Native Instagram SVG */}
+                      <svg className="h-3.5 w-3.5 text-pink-600 fill-current" viewBox="0 0 24 24">
+                        <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z" />
+                      </svg>
+                      <span>IG: @dekut_wec</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      {/* Native X SVG */}
+                      <svg className="h-3.5 w-3.5 text-slate-900 fill-current" viewBox="0 0 24 24">
+                        <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+                      </svg>
+                      <span>X: @Dekut_WEC</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <PhoneCall className="h-3.5 w-3.5 text-emerald-600" />
+                      <span>WhatsApp: 0758638953</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      {/* Native TikTok SVG */}
+                      <svg className="h-3.5 w-3.5 text-slate-900 fill-current" viewBox="0 0 24 24">
+                        <path d="M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-1.01-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.24 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z" />
+                      </svg>
+                      <span>TikTok: @dekut_wec</span>
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm transition flex items-center justify-center gap-2 shadow-md"
+                >
+                  <Sparkles className="h-4 w-4" />
+                  <span>Generate Detailed AI Poster Prompt & Canvas</span>
+                </button>
+              </form>
+            </div>
+
+            {/* Generated Output Preview (5 cols) */}
+            <div className="lg:col-span-5 bg-white rounded-3xl border border-slate-200 p-6 shadow-xs space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <h4 className="font-bold text-slate-900 text-sm">Engineered AI Prompt</h4>
+                {generatedPrompt && (
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(generatedPrompt);
+                      setCopiedPrompt(true);
+                      setTimeout(() => setCopiedPrompt(false), 2000);
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold flex items-center gap-1 transition"
+                  >
+                    {copiedPrompt ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+                    <span>{copiedPrompt ? "Copied" : "Copy"}</span>
+                  </button>
+                )}
+              </div>
+
+              {generatedPrompt ? (
+                <div className="space-y-4">
+                  <div className="p-4 rounded-2xl bg-slate-950 text-slate-200 text-xs font-mono leading-relaxed max-h-[460px] overflow-y-auto whitespace-pre-wrap">
+                    {generatedPrompt}
+                  </div>
+                  <p className="text-[11px] text-slate-500 italic">
+                    Paste this detailed prompt into Midjourney, DALL-E, Ideogram, or Adobe Firefly to generate your flyer.
+                  </p>
+                </div>
+              ) : (
+                <div className="py-20 text-center text-slate-400 space-y-2">
+                  <Sparkles className="h-8 w-8 mx-auto text-slate-300" />
+                  <p className="text-xs">Fill in your event details on the left to generate the prompt.</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ==================== TAB 4: MANAGE EVENTS ==================== */}
         {adminTab === "events" && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-            {/* Create Event Form (7 cols) */}
             <div className="lg:col-span-7 bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-xs">
               <h3 className="text-xl font-black text-slate-900">Add New Event / Expedition</h3>
               <p className="text-xs text-slate-500 mt-1 mb-6">Upload posters and details for upcoming or past events.</p>
@@ -545,10 +1209,9 @@ export default function AdminDashboard() {
                   </div>
                 </div>
 
-                {/* Device File Upload */}
                 <div>
                   <label className="block text-xs font-bold uppercase text-slate-700 mb-1">
-                    Event Poster / Photo (Upload from Device)
+                    Event Poster / Photo
                   </label>
                   <div className="flex items-center gap-3">
                     <label className="cursor-pointer flex items-center gap-2 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold border border-slate-300 transition">
@@ -606,7 +1269,6 @@ export default function AdminDashboard() {
               </form>
             </div>
 
-            {/* Live Events List & Delete Controls (5 cols) */}
             <div className="lg:col-span-5 bg-white rounded-3xl border border-slate-200 p-6 shadow-xs">
               <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-4">
                 <h4 className="font-bold text-slate-900">Current Published Events</h4>
@@ -616,15 +1278,13 @@ export default function AdminDashboard() {
               </div>
 
               {eventsList.length === 0 ? (
-                <p className="text-xs text-slate-400 py-8 text-center italic">
-                  No events added yet. Add your first event on the left.
-                </p>
+                <p className="text-xs text-slate-400 py-8 text-center italic">No events added yet.</p>
               ) : (
                 <div className="space-y-3 max-h-[620px] overflow-y-auto pr-1">
                   {eventsList.map((evt) => (
                     <div
                       key={evt.id}
-                      className="p-3 rounded-2xl border border-slate-100 bg-slate-50 flex items-start justify-between gap-3 hover:border-slate-300 transition"
+                      className="p-3 rounded-2xl border border-slate-100 bg-slate-50 flex items-start justify-between gap-3"
                     >
                       <img
                         src={evt.imageUrl}
@@ -632,9 +1292,13 @@ export default function AdminDashboard() {
                         className="h-14 w-14 rounded-xl object-cover flex-shrink-0 bg-slate-200"
                       />
                       <div className="flex-grow min-w-0">
-                        <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-md ${
-                          evt.type === "upcoming" ? "bg-emerald-100 text-emerald-800" : "bg-slate-200 text-slate-700"
-                        }`}>
+                        <span
+                          className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-md ${
+                            evt.type === "upcoming"
+                              ? "bg-emerald-100 text-emerald-800"
+                              : "bg-slate-200 text-slate-700"
+                          }`}
+                        >
                           {evt.type}
                         </span>
                         <h5 className="font-bold text-slate-900 text-xs truncate mt-1">{evt.title}</h5>
@@ -644,7 +1308,6 @@ export default function AdminDashboard() {
                       <button
                         onClick={() => handleDeleteEvent(evt.id)}
                         className="p-2 text-rose-500 hover:bg-rose-50 rounded-xl transition"
-                        title="Delete Event"
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>
@@ -656,21 +1319,19 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        {/* ==================== TAB 2: MULTI-FEED DISCUSSIONS & GLOBAL TOPICS ==================== */}
+        {/* ==================== TAB 5: DISCUSSIONS & GLOBAL TOPICS ==================== */}
         {adminTab === "discussions" && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-            
-            {/* Create Discussion Form (6 cols) */}
             <div className="lg:col-span-6 bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-xs">
               <h3 className="text-xl font-black text-slate-900">Post Feed Topic or Global Event</h3>
               <p className="text-xs text-slate-500 mt-1 mb-6">
-                Add several active debate questions, Kenyan conservation updates, or world headlines.
+                Add debate questions, Kenyan conservation news, or climate headlines.
               </p>
 
               <form onSubmit={handleSaveDiscussion} className="space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-bold uppercase text-slate-700 mb-1">Channel / Category</label>
+                    <label className="block text-xs font-bold uppercase text-slate-700 mb-1">Category</label>
                     <select
                       value={discCategory}
                       onChange={(e: any) => setDiscCategory(e.target.value)}
@@ -688,7 +1349,6 @@ export default function AdminDashboard() {
                     <input
                       type="text"
                       required
-                      placeholder="Wednesday • 4:00 PM • RC"
                       value={discMeetingInfo}
                       onChange={(e) => setDiscMeetingInfo(e.target.value)}
                       className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
@@ -697,11 +1357,10 @@ export default function AdminDashboard() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold uppercase text-slate-700 mb-1">Topic Headline</label>
+                  <label className="block text-xs font-bold uppercase text-slate-700 mb-1">Headline</label>
                   <input
                     type="text"
                     required
-                    placeholder="e.g. Carbon Credits: Climate Solution or Corporate Greenwashing?"
                     value={discTitle}
                     onChange={(e) => setDiscTitle(e.target.value)}
                     className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
@@ -709,13 +1368,10 @@ export default function AdminDashboard() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold uppercase text-slate-700 mb-1">
-                    Discussion Prompt / News Summary
-                  </label>
+                  <label className="block text-xs font-bold uppercase text-slate-700 mb-1">Prompt / Summary</label>
                   <textarea
                     rows={4}
                     required
-                    placeholder="Provide context, key statistics, and open-floor questions for members to debate..."
                     value={discPrompt}
                     onChange={(e) => setDiscPrompt(e.target.value)}
                     className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
@@ -733,353 +1389,216 @@ export default function AdminDashboard() {
               </form>
             </div>
 
-            {/* Live Feed Stream & Deletions (6 cols) */}
             <div className="lg:col-span-6 bg-white rounded-3xl border border-slate-200 p-6 shadow-xs">
-              <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-4">
-                <h4 className="font-bold text-slate-900">Active News & Debate Topics ({discussionsList.length})</h4>
-              </div>
-
-              {discussionsList.length === 0 ? (
-                <p className="text-xs text-slate-400 py-8 text-center italic">
-                  No active topics posted yet. Add items to populate the EcoPulse feed.
-                </p>
-              ) : (
-                <div className="space-y-4 max-h-[580px] overflow-y-auto pr-1">
-                  {discussionsList.map((item) => (
-                    <div
-                      key={item.id}
-                      className="p-4 rounded-2xl border border-slate-200 bg-slate-50 flex flex-col justify-between gap-3"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                          <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-md ${
-                            item.category === "Debate" 
-                              ? "bg-amber-100 text-amber-900" 
-                              : item.category === "Kenya"
-                              ? "bg-emerald-100 text-emerald-900"
-                              : "bg-blue-100 text-blue-900"
-                          }`}>
-                            {item.category}
-                          </span>
-                          <span className="text-[11px] text-slate-400">{item.meetingInfo}</span>
-                        </div>
-                        <button
-                          onClick={() => handleDeleteDiscussion(item.id)}
-                          className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg transition"
-                          title="Delete Feed Item"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-
-                      <div>
-                        <h5 className="font-bold text-slate-900 text-sm leading-snug">"{item.title}"</h5>
-                        <p className="text-xs text-slate-600 mt-1 line-clamp-3 leading-relaxed">
-                          {item.prompt}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-          </div>
-        )}
-
-        {/* ==================== TAB 3: NATURE SNAPS ==================== */}
-        {adminTab === "snaps" && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-            
-            {/* Upload Winner Form (7 cols) */}
-            <div className="lg:col-span-7 bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-xs">
-              <h3 className="text-xl font-black text-slate-900">Feature Winning Nature Snap</h3>
-              <p className="text-xs text-slate-500 mt-1 mb-6">
-                Showcase student photography on the left-to-right sliding wall.
-              </p>
-
-              <form onSubmit={handleSaveSnap} className="space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-bold uppercase text-slate-700 mb-1">Photo Title</label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="e.g. Crowned Hornbill at Sunrise"
-                      value={snapTitle}
-                      onChange={(e) => setSnapTitle(e.target.value)}
-                      className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold uppercase text-slate-700 mb-1">Photographer Name</label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="e.g. Faith Wambui"
-                      value={photographer}
-                      onChange={(e) => setPhotographer(e.target.value)}
-                      className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  <div>
-                    <label className="block text-xs font-bold uppercase text-slate-700 mb-1">Week Label</label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="Week 5 Winner"
-                      value={snapWeek}
-                      onChange={(e) => setSnapWeek(e.target.value)}
-                      className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold uppercase text-slate-700 mb-1">Semester</label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="Aug - Dec 2026"
-                      value={snapSemester}
-                      onChange={(e) => setSnapSemester(e.target.value)}
-                      className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold uppercase text-slate-700 mb-1">Location</label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="DKUT Nature Trail"
-                      value={snapLocation}
-                      onChange={(e) => setSnapLocation(e.target.value)}
-                      className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
-                    />
-                  </div>
-                </div>
-
-                {/* Device Upload for Snap */}
-                <div>
-                  <label className="block text-xs font-bold uppercase text-slate-700 mb-1">
-                    Winning Photo File (Upload from Device)
-                  </label>
-                  <div className="flex items-center gap-3">
-                    <label className="cursor-pointer flex items-center gap-2 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold border border-slate-300 transition">
-                      <UploadCloud className="h-4 w-4 text-emerald-600" />
-                      <span>{uploadingImage ? "Uploading..." : "Upload Photo"}</span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          if (file) handleImageUpload(file, setSnapImageUrl);
-                        }}
-                      />
-                    </label>
-                    <span className="text-xs text-slate-400">or paste URL</span>
-                  </div>
-
-                  <input
-                    type="url"
-                    placeholder="https://..."
-                    value={snapImageUrl}
-                    onChange={(e) => setSnapImageUrl(e.target.value)}
-                    className="w-full p-2.5 rounded-xl border border-slate-200 text-sm mt-2"
-                  />
-
-                  {snapImageUrl && (
-                    <div className="mt-2 h-36 w-full rounded-xl overflow-hidden border border-slate-200 bg-slate-900">
-                      <img src={snapImageUrl} alt="Preview" className="h-full w-full object-cover" />
-                    </div>
-                  )}
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold uppercase text-slate-700 mb-1">Camera Info (Optional)</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Shot on Nikon D3500 or Pixel 8"
-                    value={cameraInfo}
-                    onChange={(e) => setCameraInfo(e.target.value)}
-                    className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={loading || uploadingImage}
-                  className="w-full py-3 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-sm transition flex items-center justify-center gap-2"
-                >
-                  {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                  <span>Post Awarded Photo</span>
-                </button>
-              </form>
-            </div>
-
-            {/* List Snaps & Deletions (5 cols) */}
-            <div className="lg:col-span-5 bg-white rounded-3xl border border-slate-200 p-6 shadow-xs">
               <h4 className="font-bold text-slate-900 pb-4 border-b border-slate-100 mb-4">
-                Published Snaps ({snapsList.length})
+                Active Topics ({discussionsList.length})
               </h4>
-              {snapsList.length === 0 ? (
-                <p className="text-xs text-slate-400 py-8 text-center italic">
-                  No snaps uploaded yet.
-                </p>
-              ) : (
-                <div className="space-y-3 max-h-[580px] overflow-y-auto pr-1">
-                  {snapsList.map((snap) => (
-                    <div
-                      key={snap.id}
-                      className="p-3 rounded-2xl border border-slate-100 bg-slate-50 flex items-center justify-between gap-3"
-                    >
-                      <img
-                        src={snap.imageUrl}
-                        alt=""
-                        className="h-12 w-12 rounded-xl object-cover flex-shrink-0"
-                      />
-                      <div className="flex-grow min-w-0">
-                        <p className="font-bold text-slate-900 text-xs truncate">{snap.title}</p>
-                        <p className="text-[11px] text-slate-500">By {snap.photographerName} • {snap.weekLabel}</p>
-                      </div>
+              <div className="space-y-4 max-h-[580px] overflow-y-auto pr-1">
+                {discussionsList.map((item) => (
+                  <div key={item.id} className="p-4 rounded-2xl border border-slate-200 bg-slate-50 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
+                        {item.category}
+                      </span>
                       <button
-                        onClick={() => handleDeleteSnap(snap.id)}
-                        className="p-2 text-rose-500 hover:bg-rose-50 rounded-xl transition"
+                        onClick={() => handleDeleteDiscussion(item.id)}
+                        className="text-rose-500 hover:bg-rose-50 p-1 rounded"
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>
                     </div>
-                  ))}
-                </div>
-              )}
+                    <h5 className="font-bold text-slate-900 text-sm">{item.title}</h5>
+                    <p className="text-xs text-slate-600 line-clamp-3">{item.prompt}</p>
+                  </div>
+                ))}
+              </div>
             </div>
-
           </div>
         )}
 
-        {/* ==================== TAB 4: QUIZ CONTROLS ==================== */}
+        {/* ==================== TAB 6: NATURE SNAPS ==================== */}
+        {adminTab === "snaps" && (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+            <div className="lg:col-span-7 bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-xs">
+              <h3 className="text-xl font-black text-slate-900">Feature Nature Snap Winner</h3>
+              <form onSubmit={handleSaveSnap} className="space-y-4 mt-6">
+                <div className="grid grid-cols-2 gap-4">
+                  <input
+                    type="text"
+                    required
+                    placeholder="Photo Title"
+                    value={snapTitle}
+                    onChange={(e) => setSnapTitle(e.target.value)}
+                    className="p-2.5 rounded-xl border border-slate-200 text-sm"
+                  />
+                  <input
+                    type="text"
+                    required
+                    placeholder="Photographer Name"
+                    value={photographer}
+                    onChange={(e) => setPhotographer(e.target.value)}
+                    className="p-2.5 rounded-xl border border-slate-200 text-sm"
+                  />
+                </div>
+                <div className="grid grid-cols-3 gap-4">
+                  <input
+                    type="text"
+                    required
+                    placeholder="Week Label"
+                    value={snapWeek}
+                    onChange={(e) => setSnapWeek(e.target.value)}
+                    className="p-2.5 rounded-xl border border-slate-200 text-sm"
+                  />
+                  <input
+                    type="text"
+                    required
+                    placeholder="Semester"
+                    value={snapSemester}
+                    onChange={(e) => setSnapSemester(e.target.value)}
+                    className="p-2.5 rounded-xl border border-slate-200 text-sm"
+                  />
+                  <input
+                    type="text"
+                    required
+                    placeholder="Location"
+                    value={snapLocation}
+                    onChange={(e) => setSnapLocation(e.target.value)}
+                    className="p-2.5 rounded-xl border border-slate-200 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="cursor-pointer flex items-center gap-2 px-4 py-2.5 bg-slate-100 rounded-xl text-xs font-bold border border-slate-300">
+                    <UploadCloud className="h-4 w-4 text-emerald-600" />
+                    <span>Upload Winning Image</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleImageUpload(file, setSnapImageUrl);
+                      }}
+                    />
+                  </label>
+                  <input
+                    type="url"
+                    placeholder="or paste URL"
+                    value={snapImageUrl}
+                    onChange={(e) => setSnapImageUrl(e.target.value)}
+                    className="w-full p-2.5 rounded-xl border border-slate-200 text-sm mt-2"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full py-3 rounded-xl bg-emerald-700 text-white font-bold text-sm"
+                >
+                  Feature Photo
+                </button>
+              </form>
+            </div>
+
+            <div className="lg:col-span-5 bg-white rounded-3xl border border-slate-200 p-6 shadow-xs">
+              <h4 className="font-bold text-slate-900 mb-4 pb-2 border-b">Current Featured Snaps</h4>
+              <div className="space-y-3 max-h-[580px] overflow-y-auto">
+                {snapsList.map((snap) => (
+                  <div key={snap.id} className="p-3 rounded-xl border bg-slate-50 flex items-center gap-3">
+                    <img src={snap.imageUrl} className="h-12 w-12 rounded-lg object-cover" />
+                    <div className="flex-grow min-w-0">
+                      <p className="font-bold text-xs truncate">{snap.title}</p>
+                      <p className="text-[10px] text-slate-500">By {snap.photographerName}</p>
+                    </div>
+                    <button onClick={() => handleDeleteSnap(snap.id)} className="text-rose-500 p-1">
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ==================== TAB 7: WEEKLY QUIZ ==================== */}
         {adminTab === "quiz" && (
           <div className="max-w-3xl mx-auto bg-white rounded-3xl border border-slate-200 p-6 sm:p-10 shadow-xs">
-            <h3 className="text-xl font-black text-slate-900">Set Live Weekly Quiz</h3>
-            <p className="text-xs text-slate-500 mt-1 mb-6">
-              Winners are tallied and rewarded in our regular weekly physical sessions.
-            </p>
-
+            <h3 className="text-xl font-black text-slate-900 mb-6">Update Active Weekly Quiz</h3>
             <form onSubmit={handleSaveQuiz} className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold uppercase text-slate-700 mb-1">Week Label</label>
+              <input
+                type="text"
+                required
+                placeholder="Week Label (e.g. Week 5 Challenge)"
+                value={quizWeek}
+                onChange={(e) => setQuizWeek(e.target.value)}
+                className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
+              />
+              <textarea
+                rows={3}
+                required
+                placeholder="Quiz Question"
+                value={quizQuestion}
+                onChange={(e) => setQuizQuestion(e.target.value)}
+                className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
+              />
+              <div className="grid grid-cols-2 gap-4">
                 <input
                   type="text"
                   required
-                  placeholder="Week 5 Challenge"
-                  value={quizWeek}
-                  onChange={(e) => setQuizWeek(e.target.value)}
-                  className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
+                  placeholder="Option A"
+                  value={optA}
+                  onChange={(e) => setOptA(e.target.value)}
+                  className="p-2.5 rounded-xl border border-slate-200 text-sm"
                 />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold uppercase text-slate-700 mb-1">Quiz Question</label>
-                <textarea
-                  rows={3}
+                <input
+                  type="text"
                   required
-                  placeholder="Type the weekly question here..."
-                  value={quizQuestion}
-                  onChange={(e) => setQuizQuestion(e.target.value)}
-                  className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
+                  placeholder="Option B"
+                  value={optB}
+                  onChange={(e) => setOptB(e.target.value)}
+                  className="p-2.5 rounded-xl border border-slate-200 text-sm"
+                />
+                <input
+                  type="text"
+                  required
+                  placeholder="Option C"
+                  value={optC}
+                  onChange={(e) => setOptC(e.target.value)}
+                  className="p-2.5 rounded-xl border border-slate-200 text-sm"
+                />
+                <input
+                  type="text"
+                  required
+                  placeholder="Option D"
+                  value={optD}
+                  onChange={(e) => setOptD(e.target.value)}
+                  className="p-2.5 rounded-xl border border-slate-200 text-sm"
                 />
               </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold uppercase text-slate-700 mb-1">Option A</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="Choice A"
-                    value={optA}
-                    onChange={(e) => setOptA(e.target.value)}
-                    className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold uppercase text-slate-700 mb-1">Option B</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="Choice B"
-                    value={optB}
-                    onChange={(e) => setOptB(e.target.value)}
-                    className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold uppercase text-slate-700 mb-1">Option C</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="Choice C"
-                    value={optC}
-                    onChange={(e) => setOptC(e.target.value)}
-                    className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold uppercase text-slate-700 mb-1">Option D</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="Choice D"
-                    value={optD}
-                    onChange={(e) => setOptD(e.target.value)}
-                    className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
-                  />
-                </div>
+              <div className="grid grid-cols-2 gap-4">
+                <select
+                  value={correctIndex}
+                  onChange={(e) => setCorrectIndex(Number(e.target.value))}
+                  className="p-2.5 rounded-xl border border-slate-200 text-sm bg-white"
+                >
+                  <option value={0}>Option A is Correct</option>
+                  <option value={1}>Option B is Correct</option>
+                  <option value={2}>Option C is Correct</option>
+                  <option value={3}>Option D is Correct</option>
+                </select>
+                <input
+                  type="text"
+                  required
+                  placeholder="Scientific Explanation"
+                  value={explanation}
+                  onChange={(e) => setExplanation(e.target.value)}
+                  className="p-2.5 rounded-xl border border-slate-200 text-sm"
+                />
               </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold uppercase text-slate-700 mb-1">Correct Answer</label>
-                  <select
-                    value={correctIndex}
-                    onChange={(e) => setCorrectIndex(Number(e.target.value))}
-                    className="w-full p-2.5 rounded-xl border border-slate-200 text-sm bg-white"
-                  >
-                    <option value={0}>Option A is Correct</option>
-                    <option value={1}>Option B is Correct</option>
-                    <option value={2}>Option C is Correct</option>
-                    <option value={3}>Option D is Correct</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold uppercase text-slate-700 mb-1">Scientific Explanation</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="Why this choice is correct..."
-                    value={explanation}
-                    onChange={(e) => setExplanation(e.target.value)}
-                    className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
-                  />
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full py-3 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-sm transition flex items-center justify-center gap-2"
-              >
-                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                <span>Update Weekly Quiz</span>
+              <button type="submit" disabled={loading} className="w-full py-3 rounded-xl bg-emerald-700 text-white font-bold text-sm">
+                Publish Active Quiz
               </button>
             </form>
           </div>
         )}
-
       </main>
     </div>
   );
