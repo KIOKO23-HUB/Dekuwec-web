@@ -23,7 +23,6 @@ export default function LoginPage() {
   const [errorMsg, setErrorMsg] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // Email & Password Login -> Redirects to Home Page (/)
   const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg("");
@@ -50,7 +49,6 @@ export default function LoginPage() {
     }
   };
 
-  // Google Single Sign-On -> Redirects to Home Page (/)
   const handleGoogleLogin = async () => {
     setErrorMsg("");
     setLoading(true);
@@ -89,13 +87,10 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col justify-center items-center px-4 py-12 relative overflow-hidden font-sans selection:bg-emerald-500 selection:text-slate-950">
-      {/* Background Decorative Gradient Orbs */}
       <div className="absolute top-[-10%] left-[-10%] w-[450px] h-[450px] rounded-full bg-emerald-600/15 blur-[120px] pointer-events-none" />
       <div className="absolute bottom-[-10%] right-[-10%] w-[450px] h-[450px] rounded-full bg-emerald-500/10 blur-[120px] pointer-events-none" />
 
-      {/* Main Authentication Card */}
       <div className="w-full max-w-md bg-slate-900/90 backdrop-blur-xl border border-emerald-900/50 rounded-3xl p-8 sm:p-10 shadow-2xl relative z-10">
-        {/* Brand Header */}
         <div className="flex flex-col items-center text-center">
           <Link href="/" className="group inline-block">
             <img
@@ -112,7 +107,6 @@ export default function LoginPage() {
           </p>
         </div>
 
-        {/* Error Alert */}
         {errorMsg && (
           <div className="mt-6 p-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-center gap-2.5">
             <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" />
@@ -120,7 +114,6 @@ export default function LoginPage() {
           </div>
         )}
 
-        {/* Form Fields */}
         <form onSubmit={handleEmailLogin} className="mt-6 space-y-4">
           <div>
             <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-300 mb-1.5">
@@ -179,7 +172,6 @@ export default function LoginPage() {
           </button>
         </form>
 
-        {/* Divider */}
         <div className="relative my-6">
           <div className="absolute inset-0 flex items-center">
             <div className="w-full border-t border-slate-800" />
@@ -189,7 +181,6 @@ export default function LoginPage() {
           </div>
         </div>
 
-        {/* Google Auth Button */}
         <button
           type="button"
           onClick={handleGoogleLogin}
@@ -205,7 +196,6 @@ export default function LoginPage() {
           <span>Continue with Google</span>
         </button>
 
-        {/* Link to Signup */}
         <p className="mt-8 text-center text-xs text-slate-400">
           Don't have an account?{" "}
           <Link href="/signup" className="text-emerald-400 font-bold hover:underline">
@@ -214,7 +204,6 @@ export default function LoginPage() {
         </p>
       </div>
 
-      {/* Return Home Link */}
       <Link href="/" className="mt-6 text-xs text-slate-500 hover:text-emerald-400 font-medium transition">
         ← Return to Main Portal
       </Link>

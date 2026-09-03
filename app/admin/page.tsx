@@ -41,10 +41,12 @@ import {
   Copy,
   Check,
   PhoneCall,
-  Image as ImageIcon
+  Image as ImageIcon,
+  CheckSquare,
+  XCircle
 } from "lucide-react";
 
-const CLUB_LOGO_URL = "https://i.postimg.cc/HLsfSHMm/Whats-App-Image-2026-09-03-at-09-49-04.jpg";
+const CLUB_LOGO_URL = "https://i.postimg.cc/qB9gLwmz/Whats-App-Image-2026-09-03-at-09-49-04.jpg";
 const DEKUT_LOGO_URL = "https://i.postimg.cc/Xq84V1xK/Dekut-logo.jpg";
 
 export default function AdminDashboard() {
@@ -79,6 +81,8 @@ export default function AdminDashboard() {
   const [templateImgUrl, setTemplateImgUrl] = useState("");
   const [bgImgUrl, setBgImgUrl] = useState("");
   const [noUploadsConfirmed, setNoUploadsConfirmed] = useState(false);
+  const [colorScheme, setColorScheme] = useState("forest");
+  const [posterImages, setPosterImages] = useState<string[]>([]);
   const [posterDetails, setPosterDetails] = useState({
     title: "",
     theme: "",
@@ -90,6 +94,8 @@ export default function AdminDashboard() {
   });
   const [generatedPrompt, setGeneratedPrompt] = useState("");
   const [copiedPrompt, setCopiedPrompt] = useState(false);
+  const [generatedPosterUrl, setGeneratedPosterUrl] = useState("");
+  const [generatingPoster, setGeneratingPoster] = useState(false);
 
   // --- Events State ---
   const [eventTitle, setEventTitle] = useState("");
@@ -102,7 +108,7 @@ export default function AdminDashboard() {
 
   // --- Discussions State ---
   const [discTitle, setDiscTitle] = useState("");
-  const [discCategory, setDiscCategory] = useState<"Kenya" | "Global" | "Campus" | "Debate">("Debate");
+  const [discCategory, setDiscCategory] = useState<"Kenya" | "Global" | "Campus" | "Debate" | "Knowledge" | "Question">("Debate");
   const [discPrompt, setDiscPrompt] = useState("");
   const [discMeetingInfo, setDiscMeetingInfo] = useState("Wednesday • 4:00 PM • Resource Centre");
 
@@ -141,24 +147,20 @@ export default function AdminDashboard() {
   useEffect(() => {
     if (!isAuthenticated) return;
 
-    // Listen to All Members / Signups
     const unsubMembers = onSnapshot(collection(db, "members"), (snapshot) => {
       setAllUsersList(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
     });
 
-    // Listen to Events
     const qEvents = query(collection(db, "events"), orderBy("createdAt", "desc"));
     const unsubEvents = onSnapshot(qEvents, (snapshot) => {
       setEventsList(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
     });
 
-    // Listen to Discussions & News Feed
     const qDisc = query(collection(db, "discussions_feed"), orderBy("createdAt", "desc"));
     const unsubDisc = onSnapshot(qDisc, (snapshot) => {
       setDiscussionsList(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
     });
 
-    // Listen to Nature Snaps
     const qSnaps = query(collection(db, "nature_snaps"), orderBy("createdAt", "desc"));
     const unsubSnaps = onSnapshot(qSnaps, (snapshot) => {
       setSnapsList(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
@@ -172,12 +174,9 @@ export default function AdminDashboard() {
     };
   }, [isAuthenticated]);
 
-  // Member Categorization
   const registeredApproved = allUsersList.filter((m) => m.status === "Approved");
   const pendingApprovals = allUsersList.filter((m) => m.status === "Pending");
-  const generalSignups = allUsersList.filter((m) => m.status === "Unregistered" || !m.status);
 
-  // Status Modifiers
   const handleSetStatus = async (uid: string, newStatus: "Approved" | "Pending" | "Unregistered") => {
     try {
       await updateDoc(doc(db, "members", uid), { status: newStatus });
@@ -188,7 +187,7 @@ export default function AdminDashboard() {
     }
   };
 
-  // Generic Image Uploader
+  // Generic Image Uploader (Used for Events, Snaps, and Notifications)
   const handleImageUpload = async (file: File, setUrlCallback: (url: string) => void) => {
     if (!file) return;
     setUploadingImage(true);
@@ -211,6 +210,7 @@ export default function AdminDashboard() {
           setUrlCallback(downloadUrl);
           setUploadingImage(false);
           setSuccessMsg("Image uploaded successfully!");
+          setTimeout(() => setSuccessMsg(null), 3000);
         }
       );
     } catch (err: any) {
@@ -219,9 +219,66 @@ export default function AdminDashboard() {
     }
   };
 
+  // Browser Base64 Uploader for instant poster images (Fixes the hanging upload issue)
+  const handleMultiImageUpload = async (files: FileList) => {
+    if (!files || files.length === 0) return;
+    setUploadingImage(true);
+    setErrorMsg(null);
+
+    try {
+      const base64Promises: Promise<string>[] = [];
+      const filesToProcess = Array.from(files).slice(0, 4);
+
+      for (const file of filesToProcess) {
+        base64Promises.push(
+          new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.onerror = (error) => reject(error);
+            reader.readAsDataURL(file);
+          })
+        );
+      }
+
+      const uploadedUrls = await Promise.all(base64Promises);
+      setPosterImages((prev) => [...prev, ...uploadedUrls].slice(0, 4));
+      setUploadingImage(false);
+      setSuccessMsg("Event photos successfully added to poster grid!");
+      setTimeout(() => setSuccessMsg(null), 3000);
+    } catch (err: any) {
+      setErrorMsg("Failed to process photos: " + err.message);
+      setUploadingImage(false);
+    }
+  };
+
   // Broadcast Push Notification (Website + Email)
-  const handleSendBroadcast = async (e: React.FormEvent) => {
+  const handlePushWebNotification = async (e: React.FormEvent) => {
     e.preventDefault();
+    setLoading(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+
+    try {
+      await addDoc(collection(db, "site_notifications"), {
+        title: notifTitle,
+        message: notifMessage,
+        imageUrl: notifImageUrl || "",
+        createdAt: serverTimestamp(),
+      });
+      setSuccessMsg("Notification successfully pushed to website feed!");
+      setNotifTitle(""); setNotifMessage(""); setNotifImageUrl("");
+    } catch (err: any) {
+      setErrorMsg(err.message || "Failed to push website notification.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSendEmailBroadcast = async () => {
+    if (!notifTitle || !notifMessage) {
+      setErrorMsg("Please provide both a title and message before sending emails.");
+      return;
+    }
     setLoading(true);
     setErrorMsg(null);
     setSuccessMsg(null);
@@ -237,18 +294,15 @@ export default function AdminDashboard() {
           message: notifMessage,
           imageUrl: notifImageUrl,
           targetEmails,
-          sendEmail: sendToEmail,
+          sendEmail: true,
         }),
       });
 
-      if (!res.ok) throw new Error("Failed to send notification.");
+      if (!res.ok) throw new Error("Failed to dispatch announcement emails.");
 
-      setSuccessMsg("Notification successfully broadcasted to website and member emails!");
-      setNotifTitle("");
-      setNotifMessage("");
-      setNotifImageUrl("");
+      setSuccessMsg(`Announcement emails successfully dispatched to ${targetEmails.length} members!`);
     } catch (err: any) {
-      setErrorMsg(err.message || "Broadcast dispatch failed.");
+      setErrorMsg(err.message || "Email broadcast dispatch failed.");
     } finally {
       setLoading(false);
     }
@@ -298,6 +352,59 @@ STYLE: Professional graphic design, bold modern typography, high contrast, clean
     setGeneratedPrompt(promptText);
   };
 
+  // Generate Inbuilt Branded Poster Canvas with Custom Photos & Colors
+  const handleGenerateInbuiltPoster = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setGeneratingPoster(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+
+    try {
+      const res = await fetch("/api/admin/generate-poster", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: posterDetails.title,
+          theme: posterDetails.theme,
+          date: posterDetails.date,
+          venue: posterDetails.venue,
+          colorScheme,
+          posterImages,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to generate poster.");
+
+      setGeneratedPosterUrl(data.imageUrl);
+      setSuccessMsg("Branded event poster generated successfully!");
+    } catch (err: any) {
+      setErrorMsg(err.message || "Poster generation failed.");
+    } finally {
+      setGeneratingPoster(false);
+    }
+  };
+
+  const handleApproveDiscussion = async (id: string) => {
+    try {
+      await updateDoc(doc(db, "discussions_feed", id), { status: "Approved" });
+      setSuccessMsg("Topic approved and published live!");
+      setTimeout(() => setSuccessMsg(null), 3000);
+    } catch (err: any) {
+      setErrorMsg("Failed to approve topic: " + err.message);
+    }
+  };
+
+  const handleRejectDiscussion = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, "discussions_feed", id));
+      setSuccessMsg("Topic rejected and removed.");
+      setTimeout(() => setSuccessMsg(null), 3000);
+    } catch (err: any) {
+      setErrorMsg("Failed to delete topic: " + err.message);
+    }
+  };
+
   // --- STANDARD HANDLERS (Events, Snaps, Quizzes, Discussions) ---
   const handleSaveEvent = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -336,6 +443,10 @@ STYLE: Professional graphic design, bold modern typography, high contrast, clean
         category: discCategory,
         prompt: discPrompt.trim(),
         meetingInfo: discMeetingInfo.trim(),
+        status: "Approved",
+        likes: 0,
+        dislikes: 0,
+        comments: [],
         createdAt: serverTimestamp(),
       });
       setSuccessMsg("Discussion posted!");
@@ -457,9 +568,11 @@ STYLE: Professional graphic design, bold modern typography, high contrast, clean
       <header className="bg-emerald-950 text-white border-b border-emerald-900 px-6 py-4 sticky top-0 z-40">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-600">
-              <Trees className="h-5 w-5 text-white" />
-            </div>
+            <img
+              src={CLUB_LOGO_URL}
+              alt="DEKUWEC Logo"
+              className="h-10 w-10 rounded-xl object-cover ring-2 ring-emerald-500/40 shadow-sm bg-white"
+            />
             <div>
               <h2 className="font-bold text-sm sm:text-base leading-none">DEKUWEC Executive Desk</h2>
               <span className="text-[11px] text-emerald-300">Club Operations & PR Engine</span>
@@ -534,7 +647,7 @@ STYLE: Professional graphic design, bold modern typography, high contrast, clean
             }`}
           >
             <Globe2 className="h-4 w-4" />
-            <span>Discussions ({discussionsList.length})</span>
+            <span>Discussions & Moderation</span>
           </button>
 
           <button
@@ -759,7 +872,7 @@ STYLE: Professional graphic design, bold modern typography, high contrast, clean
               </div>
             </div>
 
-            <form onSubmit={handleSendBroadcast} className="space-y-4">
+            <form onSubmit={handlePushWebNotification} className="space-y-4">
               <div>
                 <label className="block text-xs font-bold uppercase text-slate-700 mb-1">
                   Announcement Title
@@ -788,7 +901,6 @@ STYLE: Professional graphic design, bold modern typography, high contrast, clean
                 />
               </div>
 
-              {/* Image / Poster attachment for emails */}
               <div>
                 <label className="block text-xs font-bold uppercase text-slate-700 mb-1">
                   Attach Picture or Poster URL (Included in Email Dispatch)
@@ -836,123 +948,50 @@ STYLE: Professional graphic design, bold modern typography, high contrast, clean
                 </label>
               </div>
 
-              <button
-                type="submit"
-                disabled={loading || uploadingImage}
-                className="w-full py-3.5 mt-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm transition flex items-center justify-center gap-2 disabled:opacity-50 shadow-md"
-              >
-                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                <span>Push Notification & Send Emails</span>
-              </button>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4">
+                <button
+                  type="submit"
+                  disabled={loading || uploadingImage}
+                  className="py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm transition flex items-center justify-center gap-2 disabled:opacity-50 shadow-md"
+                >
+                  {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bell className="h-4 w-4" />}
+                  <span>Push to Website Feed</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={loading || uploadingImage || !notifTitle || !notifMessage}
+                  onClick={handleSendEmailBroadcast}
+                  className="py-3.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-sm transition flex items-center justify-center gap-2 disabled:opacity-50 shadow-md"
+                >
+                  {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                  <span>Send Email to All ({allUsersList.length})</span>
+                </button>
+              </div>
             </form>
           </div>
         )}
 
-        {/* ==================== TAB 3: PR AI POSTER STUDIO ==================== */}
+        {/* ==================== TAB 3: PR AI POSTER STUDIO (WITH BROWSER BASE64 MULTI-UPLOAD) ==================== */}
         {adminTab === "ai-poster" && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-            {/* PR Configuration Form (7 cols) */}
-            <div className="lg:col-span-7 bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-xs space-y-6">
+            <div className="lg:col-span-6 bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-xs space-y-6">
               <div className="border-b border-slate-100 pb-4">
                 <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
-                  <Sparkles className="h-3 w-3" /> PR Studio Assistant
+                  <Sparkles className="h-3 w-3" /> Inbuilt Branded Canvas Generator
                 </span>
-                <h3 className="text-xl font-black text-slate-900 mt-1">AI Poster Prompt & Layout Generator</h3>
+                <h3 className="text-xl font-black text-slate-900 mt-1">Generate Branded Event Poster</h3>
                 <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
-                  Upload a sample poster to imitate its layout. The generator uses your official club branding and event details instead of the sample's text.
+                  Design official posters instantly with in-built university and club crests, customizable color palettes, and 2 to 4 uploaded event photos.
                 </p>
               </div>
 
-              {/* Step 1: Visual References */}
-              <div className="space-y-4">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700">
-                  Step 1: Visual References (Optional)
-                </h4>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {/* Template To Imitate */}
-                  <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50">
-                    <label className="block text-xs font-bold text-slate-700 mb-1">
-                      Sample Poster to Imitate
-                    </label>
-                    <label className="cursor-pointer flex items-center justify-center gap-2 p-3 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 hover:border-emerald-500 transition">
-                      <UploadCloud className="h-4 w-4 text-emerald-600" />
-                      <span>{templateImgUrl ? "Template Loaded" : "Upload Reference"}</span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          if (file) handleImageUpload(file, setTemplateImgUrl);
-                        }}
-                      />
-                    </label>
-                    {templateImgUrl && (
-                      <p className="text-[10px] text-emerald-700 font-mono mt-1.5 truncate">
-                        {templateImgUrl}
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Background Image */}
-                  <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50">
-                    <label className="block text-xs font-bold text-slate-700 mb-1">
-                      Poster Background Image
-                    </label>
-                    <label className="cursor-pointer flex items-center justify-center gap-2 p-3 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 hover:border-emerald-500 transition">
-                      <ImageIcon className="h-4 w-4 text-emerald-600" />
-                      <span>{bgImgUrl ? "Background Loaded" : "Upload Background"}</span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          if (file) handleImageUpload(file, setBgImgUrl);
-                        }}
-                      />
-                    </label>
-                    {bgImgUrl && (
-                      <p className="text-[10px] text-emerald-700 font-mono mt-1.5 truncate">
-                        {bgImgUrl}
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                {!templateImgUrl && !bgImgUrl && (
-                  <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 flex items-center justify-between">
-                    <span>No reference images uploaded? Generate poster without them:</span>
-                    <button
-                      type="button"
-                      onClick={() => setNoUploadsConfirmed(true)}
-                      className={`px-3 py-1 rounded-lg text-xs font-bold transition ${
-                        noUploadsConfirmed
-                          ? "bg-emerald-600 text-white"
-                          : "bg-amber-200 hover:bg-amber-300 text-amber-950"
-                      }`}
-                    >
-                      {noUploadsConfirmed ? "Confirmed (No Uploads)" : "Proceed Without Them"}
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {/* Step 2: Form Details */}
-              <form onSubmit={handleGeneratePosterPrompt} className="space-y-4 pt-2">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700">
-                  Step 2: Club Information to Include
-                </h4>
-
+              <form onSubmit={handleGenerateInbuiltPoster} className="space-y-4">
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Event Title / Main Bold Headline *
-                  </label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Event Title / Main Headline *</label>
                   <input
                     type="text"
                     required
-                    placeholder="e.g. Aberdare Karuru Waterfalls Expedition"
+                    placeholder="e.g. SATIMA HIKING"
                     value={posterDetails.title}
                     onChange={(e) => setPosterDetails({ ...posterDetails, title: e.target.value })}
                     className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
@@ -960,175 +999,128 @@ STYLE: Professional graphic design, bold modern typography, high contrast, clean
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Theme / Tagline / Statement
-                  </label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Theme / Subtitle</label>
                   <input
                     type="text"
-                    placeholder="e.g. Preserving High Mountain Water Towers for Future Generations"
+                    placeholder="e.g. HIKING FOR LEARN"
                     value={posterDetails.theme}
                     onChange={(e) => setPosterDetails({ ...posterDetails, theme: e.target.value })}
                     className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
                   />
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">
-                      Date of the Event *
-                    </label>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Date *</label>
                     <input
                       type="text"
                       required
-                      placeholder="e.g. Saturday, October 24, 2026"
+                      placeholder="e.g. SATURDAY 26TH SEP 2026"
                       value={posterDetails.date}
                       onChange={(e) => setPosterDetails({ ...posterDetails, date: e.target.value })}
                       className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
                     />
                   </div>
-
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">
-                      Time / Departure *
-                    </label>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Venue *</label>
                     <input
                       type="text"
                       required
-                      placeholder="e.g. 6:00 AM Sharp"
-                      value={posterDetails.time}
-                      onChange={(e) => setPosterDetails({ ...posterDetails, time: e.target.value })}
-                      className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">
-                      Venue / Meeting Point *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="e.g. DeKUT Resource Centre Quadrangle"
+                      placeholder="e.g. SASINI"
                       value={posterDetails.venue}
                       onChange={(e) => setPosterDetails({ ...posterDetails, venue: e.target.value })}
-                      className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">
-                      Host / Special Guest (Optional)
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="e.g. Hosted by DEKUWEC Executive Committee"
-                      value={posterDetails.chiefGuest}
-                      onChange={(e) => setPosterDetails({ ...posterDetails, chiefGuest: e.target.value })}
                       className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Other Special Instructions / Pricing / Registration Notes
-                  </label>
-                  <textarea
-                    rows={2}
-                    placeholder="e.g. Registration fee KES 300 (covers park entry & snacks). Open to all students."
-                    value={posterDetails.customNotes}
-                    onChange={(e) => setPosterDetails({ ...posterDetails, customNotes: e.target.value })}
-                    className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
-                  />
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Poster Color Theme</label>
+                  <select
+                    value={colorScheme}
+                    onChange={(e) => setColorScheme(e.target.value)}
+                    className="w-full p-2.5 rounded-xl border border-slate-200 text-sm bg-white font-semibold"
+                  >
+                    <option value="forest">Emerald Forest Green (Official Club)</option>
+                    <option value="earth">Deep Earth & Gold</option>
+                    <option value="navy">Midnight Navy Blue</option>
+                    <option value="sunset">Crimson Sunset</option>
+                  </select>
                 </div>
 
-                {/* Built-in Assets Reminder Box with native SVG brand icons */}
-                <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-950 space-y-2">
-                  <p className="font-bold flex items-center gap-1.5">
-                    <ShieldCheck className="h-4 w-4 text-emerald-600" />
-                    Branding Assets Automatically Injected:
-                  </p>
-                  <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-700">
-                    <div className="flex items-center gap-1.5">
-                      <img src={CLUB_LOGO_URL} alt="Club" className="h-4 w-4 rounded-full object-cover" />
-                      <span>Official Club Logo</span>
+                {/* MULTI IMAGE UPLOAD (2 TO 4 PICTURES) WITH FIXED HTMLFOR */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Upload Event Pictures (2 to 4 Images for Poster Grid)
+                  </label>
+                  <label
+                    htmlFor="poster-images-input"
+                    className="cursor-pointer flex items-center justify-center gap-2 p-3.5 bg-slate-50 border border-dashed border-slate-300 rounded-xl text-xs font-semibold text-slate-700 hover:border-emerald-500 transition"
+                  >
+                    <UploadCloud className="h-4 w-4 text-emerald-600" />
+                    <span>{uploadingImage ? "Processing photos..." : `Select Photos (${posterImages.length}/4 uploaded)`}</span>
+                  </label>
+                  <input
+                    id="poster-images-input"
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => {
+                      if (e.target.files && e.target.files.length > 0) handleMultiImageUpload(e.target.files);
+                    }}
+                  />
+                  {posterImages.length > 0 && (
+                    <div className="grid grid-cols-4 gap-2 mt-2">
+                      {posterImages.map((img, idx) => (
+                        <div key={idx} className="relative h-16 rounded-xl overflow-hidden border border-slate-200 bg-slate-100 shadow-xs">
+                          <img src={img} alt="Upload" className="h-full w-full object-cover" />
+                          <button
+                            type="button"
+                            onClick={() => setPosterImages(posterImages.filter((_, i) => i !== idx))}
+                            className="absolute top-1 right-1 bg-rose-600 text-white rounded-full h-5 w-5 flex items-center justify-center text-[10px] font-bold shadow"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
                     </div>
-                    <div className="flex items-center gap-1.5">
-                      <img src={DEKUT_LOGO_URL} alt="DeKUT" className="h-4 w-4 rounded-full object-cover" />
-                      <span>DeKUT Crest</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      {/* Native Instagram SVG */}
-                      <svg className="h-3.5 w-3.5 text-pink-600 fill-current" viewBox="0 0 24 24">
-                        <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z" />
-                      </svg>
-                      <span>IG: @dekut_wec</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      {/* Native X SVG */}
-                      <svg className="h-3.5 w-3.5 text-slate-900 fill-current" viewBox="0 0 24 24">
-                        <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
-                      </svg>
-                      <span>X: @Dekut_WEC</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <PhoneCall className="h-3.5 w-3.5 text-emerald-600" />
-                      <span>WhatsApp: 0758638953</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      {/* Native TikTok SVG */}
-                      <svg className="h-3.5 w-3.5 text-slate-900 fill-current" viewBox="0 0 24 24">
-                        <path d="M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-1.01-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.24 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z" />
-                      </svg>
-                      <span>TikTok: @dekut_wec</span>
-                    </div>
-                  </div>
+                  )}
                 </div>
 
                 <button
                   type="submit"
-                  className="w-full py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm transition flex items-center justify-center gap-2 shadow-md"
+                  disabled={generatingPoster || uploadingImage}
+                  className="w-full py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm transition flex items-center justify-center gap-2 shadow-md disabled:opacity-50"
                 >
-                  <Sparkles className="h-4 w-4" />
-                  <span>Generate Detailed AI Poster Prompt & Canvas</span>
+                  {generatingPoster ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                  <span>{generatingPoster ? "Rendering Branded Canvas..." : "Generate Branded Poster"}</span>
                 </button>
               </form>
             </div>
 
-            {/* Generated Output Preview (5 cols) */}
-            <div className="lg:col-span-5 bg-white rounded-3xl border border-slate-200 p-6 shadow-xs space-y-4">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                <h4 className="font-bold text-slate-900 text-sm">Engineered AI Prompt</h4>
-                {generatedPrompt && (
-                  <button
-                    onClick={() => {
-                      navigator.clipboard.writeText(generatedPrompt);
-                      setCopiedPrompt(true);
-                      setTimeout(() => setCopiedPrompt(false), 2000);
-                    }}
-                    className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold flex items-center gap-1 transition"
-                  >
-                    {copiedPrompt ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
-                    <span>{copiedPrompt ? "Copied" : "Copy"}</span>
-                  </button>
-                )}
-              </div>
-
-              {generatedPrompt ? (
+            {/* Canvas Preview (6 cols) */}
+            <div className="lg:col-span-6 bg-white rounded-3xl border border-slate-200 p-6 shadow-xs space-y-4 text-center">
+              <h4 className="font-bold text-slate-900 text-sm pb-3 border-b">Generated Poster Preview Canvas</h4>
+              {generatedPosterUrl ? (
                 <div className="space-y-4">
-                  <div className="p-4 rounded-2xl bg-slate-950 text-slate-200 text-xs font-mono leading-relaxed max-h-[460px] overflow-y-auto whitespace-pre-wrap">
-                    {generatedPrompt}
+                  <div className="rounded-2xl overflow-hidden border border-slate-200 bg-slate-950 p-2 max-h-[520px] shadow-lg">
+                    <img src={generatedPosterUrl} alt="Generated Poster" className="w-full h-full object-contain mx-auto rounded-xl" />
                   </div>
-                  <p className="text-[11px] text-slate-500 italic">
-                    Paste this detailed prompt into Midjourney, DALL-E, Ideogram, or Adobe Firefly to generate your flyer.
-                  </p>
+                  <a
+                    href={generatedPosterUrl}
+                    download="dekuwec-event-poster.svg"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-block px-6 py-3 rounded-xl bg-slate-900 text-white text-xs font-bold hover:bg-slate-800 transition shadow-md"
+                  >
+                    Download Full Resolution Poster
+                  </a>
                 </div>
               ) : (
-                <div className="py-20 text-center text-slate-400 space-y-2">
-                  <Sparkles className="h-8 w-8 mx-auto text-slate-300" />
-                  <p className="text-xs">Fill in your event details on the left to generate the prompt.</p>
+                <div className="py-32 text-slate-400 space-y-2">
+                  <ImageIcon className="h-12 w-12 mx-auto text-slate-300" />
+                  <p className="text-xs">Your rendered club poster will appear here instantly.</p>
                 </div>
               )}
             </div>
@@ -1139,278 +1131,180 @@ STYLE: Professional graphic design, bold modern typography, high contrast, clean
         {adminTab === "events" && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
             <div className="lg:col-span-7 bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-xs">
-              <h3 className="text-xl font-black text-slate-900">Add New Event / Expedition</h3>
-              <p className="text-xs text-slate-500 mt-1 mb-6">Upload posters and details for upcoming or past events.</p>
-
+              <h3 className="text-xl font-black text-slate-900 mb-6">Add New Event / Expedition</h3>
               <form onSubmit={handleSaveEvent} className="space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-bold uppercase text-slate-700 mb-1">Category</label>
-                    <select
-                      value={eventType}
-                      onChange={(e: any) => setEventType(e.target.value)}
-                      className="w-full p-2.5 rounded-xl border border-slate-200 text-sm bg-white"
-                    >
-                      <option value="upcoming">Upcoming Event (Active)</option>
-                      <option value="previous">Previous Event (Semester Archive)</option>
-                    </select>
-                  </div>
+                <select
+                  value={eventType}
+                  onChange={(e: any) => setEventType(e.target.value)}
+                  className="w-full p-2.5 rounded-xl border border-slate-200 text-sm bg-white"
+                >
+                  <option value="upcoming">Upcoming Event (Active)</option>
+                  <option value="previous">Previous Event (Semester Archive)</option>
+                </select>
 
-                  <div>
-                    <label className="block text-xs font-bold uppercase text-slate-700 mb-1">Event Title</label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="e.g. Aberdare Waterfall Trek"
-                      value={eventTitle}
-                      onChange={(e) => setEventTitle(e.target.value)}
-                      className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
-                    />
-                  </div>
-                </div>
+                <input
+                  type="text"
+                  required
+                  placeholder="Event Title"
+                  value={eventTitle}
+                  onChange={(e) => setEventTitle(e.target.value)}
+                  className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
+                />
 
-                <div>
-                  <label className="block text-xs font-bold uppercase text-slate-700 mb-1">
-                    12-Word Bold Statement
-                  </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="12-Word Bold Statement"
+                  value={eventStatement}
+                  onChange={(e) => setEventStatement(e.target.value)}
+                  className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
+                />
+
+                <div className="grid grid-cols-2 gap-4">
                   <input
                     type="text"
                     required
-                    placeholder="e.g. Embark on an epic expedition preserving natural mountain water catchments."
-                    value={eventStatement}
-                    onChange={(e) => setEventStatement(e.target.value)}
-                    className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
+                    placeholder="Date & Time"
+                    value={eventDate}
+                    onChange={(e) => setEventDate(e.target.value)}
+                    className="p-2.5 rounded-xl border border-slate-200 text-sm"
+                  />
+                  <input
+                    type="text"
+                    required
+                    placeholder="Venue / Route"
+                    value={eventVenue}
+                    onChange={(e) => setEventVenue(e.target.value)}
+                    className="p-2.5 rounded-xl border border-slate-200 text-sm"
                   />
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-bold uppercase text-slate-700 mb-1">Date & Time</label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="e.g. Saturday, Oct 17 • 6:30 AM"
-                      value={eventDate}
-                      onChange={(e) => setEventDate(e.target.value)}
-                      className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold uppercase text-slate-700 mb-1">Venue / Route</label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="e.g. Aberdare Range Trails"
-                      value={eventVenue}
-                      onChange={(e) => setEventVenue(e.target.value)}
-                      className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
-                    />
-                  </div>
-                </div>
-
                 <div>
-                  <label className="block text-xs font-bold uppercase text-slate-700 mb-1">
-                    Event Poster / Photo
+                  <label className="cursor-pointer flex items-center gap-2 px-4 py-2.5 bg-slate-100 rounded-xl text-xs font-bold border border-slate-300 w-fit">
+                    <UploadCloud className="h-4 w-4 text-emerald-600" />
+                    <span>Upload Poster Image</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleImageUpload(file, setEventImageUrl);
+                      }}
+                    />
                   </label>
-                  <div className="flex items-center gap-3">
-                    <label className="cursor-pointer flex items-center gap-2 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold border border-slate-300 transition">
-                      <UploadCloud className="h-4 w-4 text-emerald-600" />
-                      <span>{uploadingImage ? "Uploading..." : "Select File"}</span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          if (file) handleImageUpload(file, setEventImageUrl);
-                        }}
-                      />
-                    </label>
-                    <span className="text-xs text-slate-400">or paste URL below</span>
-                  </div>
-
                   <input
                     type="url"
-                    placeholder="https://images.unsplash.com/..."
+                    placeholder="or paste image URL"
                     value={eventImageUrl}
                     onChange={(e) => setEventImageUrl(e.target.value)}
                     className="w-full p-2.5 rounded-xl border border-slate-200 text-sm mt-2"
-                  />
-
-                  {eventImageUrl && (
-                    <div className="mt-2 h-28 w-full rounded-xl overflow-hidden border border-slate-200 bg-slate-50">
-                      <img src={eventImageUrl} alt="Preview" className="h-full w-full object-cover" />
-                    </div>
-                  )}
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold uppercase text-slate-700 mb-1">
-                    Archive / Photos Link (Optional)
-                  </label>
-                  <input
-                    type="url"
-                    placeholder="https://photos.google.com/..."
-                    value={eventLink}
-                    onChange={(e) => setEventLink(e.target.value)}
-                    className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={loading || uploadingImage}
-                  className="w-full py-3 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-sm transition flex items-center justify-center gap-2 disabled:opacity-50"
-                >
-                  {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                  <span>Publish Event</span>
-                </button>
-              </form>
-            </div>
-
-            <div className="lg:col-span-5 bg-white rounded-3xl border border-slate-200 p-6 shadow-xs">
-              <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-4">
-                <h4 className="font-bold text-slate-900">Current Published Events</h4>
-                <span className="text-xs bg-emerald-50 text-emerald-700 px-2 py-1 rounded-full font-bold">
-                  {eventsList.length} Total
-                </span>
-              </div>
-
-              {eventsList.length === 0 ? (
-                <p className="text-xs text-slate-400 py-8 text-center italic">No events added yet.</p>
-              ) : (
-                <div className="space-y-3 max-h-[620px] overflow-y-auto pr-1">
-                  {eventsList.map((evt) => (
-                    <div
-                      key={evt.id}
-                      className="p-3 rounded-2xl border border-slate-100 bg-slate-50 flex items-start justify-between gap-3"
-                    >
-                      <img
-                        src={evt.imageUrl}
-                        alt=""
-                        className="h-14 w-14 rounded-xl object-cover flex-shrink-0 bg-slate-200"
-                      />
-                      <div className="flex-grow min-w-0">
-                        <span
-                          className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-md ${
-                            evt.type === "upcoming"
-                              ? "bg-emerald-100 text-emerald-800"
-                              : "bg-slate-200 text-slate-700"
-                          }`}
-                        >
-                          {evt.type}
-                        </span>
-                        <h5 className="font-bold text-slate-900 text-xs truncate mt-1">{evt.title}</h5>
-                        <p className="text-[11px] text-slate-500">{evt.date}</p>
-                      </div>
-
-                      <button
-                        onClick={() => handleDeleteEvent(evt.id)}
-                        className="p-2 text-rose-500 hover:bg-rose-50 rounded-xl transition"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* ==================== TAB 5: DISCUSSIONS & GLOBAL TOPICS ==================== */}
-        {adminTab === "discussions" && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-            <div className="lg:col-span-6 bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-xs">
-              <h3 className="text-xl font-black text-slate-900">Post Feed Topic or Global Event</h3>
-              <p className="text-xs text-slate-500 mt-1 mb-6">
-                Add debate questions, Kenyan conservation news, or climate headlines.
-              </p>
-
-              <form onSubmit={handleSaveDiscussion} className="space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-bold uppercase text-slate-700 mb-1">Category</label>
-                    <select
-                      value={discCategory}
-                      onChange={(e: any) => setDiscCategory(e.target.value)}
-                      className="w-full p-2.5 rounded-xl border border-slate-200 text-sm bg-white"
-                    >
-                      <option value="Debate">Weekly Meeting Debate</option>
-                      <option value="Kenya">Kenya Conservation Frontline</option>
-                      <option value="Global">Global Wildlife & Climate Event</option>
-                      <option value="Campus">DKUT Campus Sustainability</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold uppercase text-slate-700 mb-1">Schedule / Tag</label>
-                    <input
-                      type="text"
-                      required
-                      value={discMeetingInfo}
-                      onChange={(e) => setDiscMeetingInfo(e.target.value)}
-                      className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold uppercase text-slate-700 mb-1">Headline</label>
-                  <input
-                    type="text"
-                    required
-                    value={discTitle}
-                    onChange={(e) => setDiscTitle(e.target.value)}
-                    className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold uppercase text-slate-700 mb-1">Prompt / Summary</label>
-                  <textarea
-                    rows={4}
-                    required
-                    value={discPrompt}
-                    onChange={(e) => setDiscPrompt(e.target.value)}
-                    className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
                   />
                 </div>
 
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full py-3 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-sm transition flex items-center justify-center gap-2"
+                  className="w-full py-3 rounded-xl bg-emerald-700 text-white font-bold text-sm transition"
                 >
-                  {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-                  <span>Add to Live Feed</span>
+                  Publish Event
                 </button>
               </form>
             </div>
 
-            <div className="lg:col-span-6 bg-white rounded-3xl border border-slate-200 p-6 shadow-xs">
-              <h4 className="font-bold text-slate-900 pb-4 border-b border-slate-100 mb-4">
-                Active Topics ({discussionsList.length})
-              </h4>
-              <div className="space-y-4 max-h-[580px] overflow-y-auto pr-1">
-                {discussionsList.map((item) => (
-                  <div key={item.id} className="p-4 rounded-2xl border border-slate-200 bg-slate-50 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
-                        {item.category}
-                      </span>
-                      <button
-                        onClick={() => handleDeleteDiscussion(item.id)}
-                        className="text-rose-500 hover:bg-rose-50 p-1 rounded"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+            <div className="lg:col-span-5 bg-white rounded-3xl border border-slate-200 p-6 shadow-xs">
+              <h4 className="font-bold text-slate-900 mb-4 pb-2 border-b">Published Events ({eventsList.length})</h4>
+              <div className="space-y-3 max-h-[500px] overflow-y-auto">
+                {eventsList.map((evt) => (
+                  <div key={evt.id} className="p-3 rounded-xl border bg-slate-50 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <img src={evt.imageUrl} className="h-12 w-12 rounded-lg object-cover" />
+                      <div>
+                        <p className="font-bold text-xs">{evt.title}</p>
+                        <p className="text-[10px] text-slate-500">{evt.date}</p>
+                      </div>
                     </div>
-                    <h5 className="font-bold text-slate-900 text-sm">{item.title}</h5>
-                    <p className="text-xs text-slate-600 line-clamp-3">{item.prompt}</p>
+                    <button onClick={() => handleDeleteEvent(evt.id)} className="text-rose-500 p-1">
+                      <Trash2 className="h-4 w-4" />
+                    </button>
                   </div>
                 ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ==================== TAB 5: DISCUSSIONS & MODERATION ==================== */}
+        {adminTab === "discussions" && (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+            <div className="lg:col-span-6 bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-xs">
+              <h3 className="text-xl font-black text-slate-900 mb-4">Post Official Discussion / News</h3>
+              <form onSubmit={handleSaveDiscussion} className="space-y-4">
+                <select
+                  value={discCategory}
+                  onChange={(e: any) => setDiscCategory(e.target.value)}
+                  className="w-full p-2.5 rounded-xl border border-slate-200 text-sm bg-white"
+                >
+                  <option value="Debate">Weekly Meeting Debate</option>
+                  <option value="Kenya">Kenya Conservation Frontline</option>
+                  <option value="Global">Global Wildlife & Climate Event</option>
+                  <option value="Campus">DKUT Campus Sustainability</option>
+                  <option value="Knowledge">Historical Fact / New Knowledge</option>
+                  <option value="Question">Community Question</option>
+                </select>
+
+                <input
+                  type="text"
+                  required
+                  placeholder="Headline"
+                  value={discTitle}
+                  onChange={(e) => setDiscTitle(e.target.value)}
+                  className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
+                />
+
+                <textarea
+                  rows={4}
+                  required
+                  placeholder="Detailed prompt..."
+                  value={discPrompt}
+                  onChange={(e) => setDiscPrompt(e.target.value)}
+                  className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
+                />
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full py-3 rounded-xl bg-emerald-700 text-white font-bold text-sm transition"
+                >
+                  Publish Official Post
+                </button>
+              </form>
+            </div>
+
+            <div className="lg:col-span-6 bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-xs">
+              <h3 className="text-xl font-black text-slate-900 mb-4">Member Submissions Moderation Queue</h3>
+              <div className="space-y-4 max-h-[580px] overflow-y-auto">
+                {discussionsList.filter((d) => d.status === "Pending").length === 0 ? (
+                  <p className="text-xs text-slate-400 py-6 text-center italic">No pending submissions.</p>
+                ) : (
+                  discussionsList.filter((d) => d.status === "Pending").map((item) => (
+                    <div key={item.id} className="p-4 rounded-2xl border border-amber-200 bg-amber-50/40 space-y-2">
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-200 text-amber-900">
+                        {item.category} • {item.authorName || "Member"}
+                      </span>
+                      <h5 className="font-bold text-slate-900 text-sm">{item.title}</h5>
+                      <p className="text-xs text-slate-700">{item.prompt}</p>
+                      <div className="flex items-center justify-end gap-2 pt-2">
+                        <button onClick={() => handleApproveDiscussion(item.id)} className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-bold flex items-center gap-1">
+                          <CheckSquare className="h-3.5 w-3.5" /> Approve
+                        </button>
+                        <button onClick={() => handleRejectDiscussion(item.id)} className="px-3 py-1.5 rounded-lg bg-rose-100 text-rose-800 text-xs font-bold flex items-center gap-1">
+                          <XCircle className="h-3.5 w-3.5" /> Reject
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           </div>
@@ -1420,97 +1314,45 @@ STYLE: Professional graphic design, bold modern typography, high contrast, clean
         {adminTab === "snaps" && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
             <div className="lg:col-span-7 bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-xs">
-              <h3 className="text-xl font-black text-slate-900">Feature Nature Snap Winner</h3>
-              <form onSubmit={handleSaveSnap} className="space-y-4 mt-6">
+              <h3 className="text-xl font-black text-slate-900 mb-6">Feature Nature Snap Winner</h3>
+              <form onSubmit={handleSaveSnap} className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
-                  <input
-                    type="text"
-                    required
-                    placeholder="Photo Title"
-                    value={snapTitle}
-                    onChange={(e) => setSnapTitle(e.target.value)}
-                    className="p-2.5 rounded-xl border border-slate-200 text-sm"
-                  />
-                  <input
-                    type="text"
-                    required
-                    placeholder="Photographer Name"
-                    value={photographer}
-                    onChange={(e) => setPhotographer(e.target.value)}
-                    className="p-2.5 rounded-xl border border-slate-200 text-sm"
-                  />
+                  <input type="text" required placeholder="Photo Title" value={snapTitle} onChange={(e) => setSnapTitle(e.target.value)} className="p-2.5 rounded-xl border border-slate-200 text-sm" />
+                  <input type="text" required placeholder="Photographer Name" value={photographer} onChange={(e) => setPhotographer(e.target.value)} className="p-2.5 rounded-xl border border-slate-200 text-sm" />
                 </div>
                 <div className="grid grid-cols-3 gap-4">
-                  <input
-                    type="text"
-                    required
-                    placeholder="Week Label"
-                    value={snapWeek}
-                    onChange={(e) => setSnapWeek(e.target.value)}
-                    className="p-2.5 rounded-xl border border-slate-200 text-sm"
-                  />
-                  <input
-                    type="text"
-                    required
-                    placeholder="Semester"
-                    value={snapSemester}
-                    onChange={(e) => setSnapSemester(e.target.value)}
-                    className="p-2.5 rounded-xl border border-slate-200 text-sm"
-                  />
-                  <input
-                    type="text"
-                    required
-                    placeholder="Location"
-                    value={snapLocation}
-                    onChange={(e) => setSnapLocation(e.target.value)}
-                    className="p-2.5 rounded-xl border border-slate-200 text-sm"
-                  />
+                  <input type="text" required placeholder="Week Label" value={snapWeek} onChange={(e) => setSnapWeek(e.target.value)} className="p-2.5 rounded-xl border border-slate-200 text-sm" />
+                  <input type="text" required placeholder="Semester" value={snapSemester} onChange={(e) => setSnapSemester(e.target.value)} className="p-2.5 rounded-xl border border-slate-200 text-sm" />
+                  <input type="text" required placeholder="Location" value={snapLocation} onChange={(e) => setSnapLocation(e.target.value)} className="p-2.5 rounded-xl border border-slate-200 text-sm" />
                 </div>
                 <div>
-                  <label className="cursor-pointer flex items-center gap-2 px-4 py-2.5 bg-slate-100 rounded-xl text-xs font-bold border border-slate-300">
+                  <label className="cursor-pointer flex items-center gap-2 px-4 py-2.5 bg-slate-100 rounded-xl text-xs font-bold border border-slate-300 w-fit">
                     <UploadCloud className="h-4 w-4 text-emerald-600" />
-                    <span>Upload Winning Image</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) handleImageUpload(file, setSnapImageUrl);
-                      }}
-                    />
+                    <span>Upload Image</span>
+                    <input type="file" accept="image/*" className="hidden" onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleImageUpload(file, setSnapImageUrl);
+                    }} />
                   </label>
-                  <input
-                    type="url"
-                    placeholder="or paste URL"
-                    value={snapImageUrl}
-                    onChange={(e) => setSnapImageUrl(e.target.value)}
-                    className="w-full p-2.5 rounded-xl border border-slate-200 text-sm mt-2"
-                  />
+                  <input type="url" placeholder="or paste URL" value={snapImageUrl} onChange={(e) => setSnapImageUrl(e.target.value)} className="w-full p-2.5 rounded-xl border border-slate-200 text-sm mt-2" />
                 </div>
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="w-full py-3 rounded-xl bg-emerald-700 text-white font-bold text-sm"
-                >
-                  Feature Photo
-                </button>
+                <button type="submit" disabled={loading} className="w-full py-3 rounded-xl bg-emerald-700 text-white font-bold text-sm">Feature Photo</button>
               </form>
             </div>
 
             <div className="lg:col-span-5 bg-white rounded-3xl border border-slate-200 p-6 shadow-xs">
-              <h4 className="font-bold text-slate-900 mb-4 pb-2 border-b">Current Featured Snaps</h4>
-              <div className="space-y-3 max-h-[580px] overflow-y-auto">
+              <h4 className="font-bold text-slate-900 mb-4 pb-2 border-b">Featured Snaps ({snapsList.length})</h4>
+              <div className="space-y-3 max-h-[500px] overflow-y-auto">
                 {snapsList.map((snap) => (
-                  <div key={snap.id} className="p-3 rounded-xl border bg-slate-50 flex items-center gap-3">
-                    <img src={snap.imageUrl} className="h-12 w-12 rounded-lg object-cover" />
-                    <div className="flex-grow min-w-0">
-                      <p className="font-bold text-xs truncate">{snap.title}</p>
-                      <p className="text-[10px] text-slate-500">By {snap.photographerName}</p>
+                  <div key={snap.id} className="p-3 rounded-xl border bg-slate-50 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <img src={snap.imageUrl} className="h-12 w-12 rounded-lg object-cover" />
+                      <div>
+                        <p className="font-bold text-xs">{snap.title}</p>
+                        <p className="text-[10px] text-slate-500">By {snap.photographerName}</p>
+                      </div>
                     </div>
-                    <button onClick={() => handleDeleteSnap(snap.id)} className="text-rose-500 p-1">
-                      <Trash2 className="h-4 w-4" />
-                    </button>
+                    <button onClick={() => handleDeleteSnap(snap.id)} className="text-rose-500 p-1"><Trash2 className="h-4 w-4" /></button>
                   </div>
                 ))}
               </div>
@@ -1523,79 +1365,24 @@ STYLE: Professional graphic design, bold modern typography, high contrast, clean
           <div className="max-w-3xl mx-auto bg-white rounded-3xl border border-slate-200 p-6 sm:p-10 shadow-xs">
             <h3 className="text-xl font-black text-slate-900 mb-6">Update Active Weekly Quiz</h3>
             <form onSubmit={handleSaveQuiz} className="space-y-4">
-              <input
-                type="text"
-                required
-                placeholder="Week Label (e.g. Week 5 Challenge)"
-                value={quizWeek}
-                onChange={(e) => setQuizWeek(e.target.value)}
-                className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
-              />
-              <textarea
-                rows={3}
-                required
-                placeholder="Quiz Question"
-                value={quizQuestion}
-                onChange={(e) => setQuizQuestion(e.target.value)}
-                className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
-              />
+              <input type="text" required placeholder="Week Label" value={quizWeek} onChange={(e) => setQuizWeek(e.target.value)} className="w-full p-2.5 rounded-xl border border-slate-200 text-sm" />
+              <textarea rows={3} required placeholder="Question" value={quizQuestion} onChange={(e) => setQuizQuestion(e.target.value)} className="w-full p-2.5 rounded-xl border border-slate-200 text-sm" />
               <div className="grid grid-cols-2 gap-4">
-                <input
-                  type="text"
-                  required
-                  placeholder="Option A"
-                  value={optA}
-                  onChange={(e) => setOptA(e.target.value)}
-                  className="p-2.5 rounded-xl border border-slate-200 text-sm"
-                />
-                <input
-                  type="text"
-                  required
-                  placeholder="Option B"
-                  value={optB}
-                  onChange={(e) => setOptB(e.target.value)}
-                  className="p-2.5 rounded-xl border border-slate-200 text-sm"
-                />
-                <input
-                  type="text"
-                  required
-                  placeholder="Option C"
-                  value={optC}
-                  onChange={(e) => setOptC(e.target.value)}
-                  className="p-2.5 rounded-xl border border-slate-200 text-sm"
-                />
-                <input
-                  type="text"
-                  required
-                  placeholder="Option D"
-                  value={optD}
-                  onChange={(e) => setOptD(e.target.value)}
-                  className="p-2.5 rounded-xl border border-slate-200 text-sm"
-                />
+                <input type="text" required placeholder="Option A" value={optA} onChange={(e) => setOptA(e.target.value)} className="p-2.5 rounded-xl border border-slate-200 text-sm" />
+                <input type="text" required placeholder="Option B" value={optB} onChange={(e) => setOptB(e.target.value)} className="p-2.5 rounded-xl border border-slate-200 text-sm" />
+                <input type="text" required placeholder="Option C" value={optC} onChange={(e) => setOptC(e.target.value)} className="p-2.5 rounded-xl border border-slate-200 text-sm" />
+                <input type="text" required placeholder="Option D" value={optD} onChange={(e) => setOptD(e.target.value)} className="p-2.5 rounded-xl border border-slate-200 z-10 text-sm" />
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <select
-                  value={correctIndex}
-                  onChange={(e) => setCorrectIndex(Number(e.target.value))}
-                  className="p-2.5 rounded-xl border border-slate-200 text-sm bg-white"
-                >
+                <select value={correctIndex} onChange={(e) => setCorrectIndex(Number(e.target.value))} className="p-2.5 rounded-xl border border-slate-200 text-sm bg-white">
                   <option value={0}>Option A is Correct</option>
                   <option value={1}>Option B is Correct</option>
                   <option value={2}>Option C is Correct</option>
                   <option value={3}>Option D is Correct</option>
                 </select>
-                <input
-                  type="text"
-                  required
-                  placeholder="Scientific Explanation"
-                  value={explanation}
-                  onChange={(e) => setExplanation(e.target.value)}
-                  className="p-2.5 rounded-xl border border-slate-200 text-sm"
-                />
+                <input type="text" required placeholder="Explanation" value={explanation} onChange={(e) => setExplanation(e.target.value)} className="p-2.5 rounded-xl border border-slate-200 text-sm" />
               </div>
-              <button type="submit" disabled={loading} className="w-full py-3 rounded-xl bg-emerald-700 text-white font-bold text-sm">
-                Publish Active Quiz
-              </button>
+              <button type="submit" className="w-full py-3 rounded-xl bg-emerald-600 text-white font-bold">Save Quiz</button>
             </form>
           </div>
         )}

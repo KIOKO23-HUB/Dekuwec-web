@@ -1,12 +1,18 @@
 // components/Navbar.tsx
 "use client";
 
+import { useState, useEffect } from "react";
+import { auth, db } from "@/lib/firebase";
+import { collection, query, where, onSnapshot } from "firebase/firestore";
 import { 
   Home, 
   Calendar, 
   Radio, 
   Camera, 
   UserPlus, 
+  UserCircle,
+  MessageSquare,
+  Bell,
   LifeBuoy, 
   X
 } from "lucide-react";
@@ -67,12 +73,30 @@ export default function Navbar({
   mobileMenuOpen,
   setMobileMenuOpen,
 }: NavbarProps) {
+  const [unreadMessages, setUnreadMessages] = useState(0);
+
+  useEffect(() => {
+    if (!auth.currentUser) return;
+    const q = query(
+      collection(db, "member_messages"),
+      where("recipientUid", "==", auth.currentUser.uid),
+      where("read", "==", false)
+    );
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setUnreadMessages(snapshot.size);
+    });
+    return () => unsubscribe();
+  }, []);
+
   const navItems = [
     { id: "home", label: "Home", icon: Home },
     { id: "events", label: "Events & Activities", icon: Calendar },
     { id: "ecopulse", label: "EcoPulse Dispatch", icon: Radio },
     { id: "snaps", label: "Nature Snaps", icon: Camera },
     { id: "membership", label: "Membership Portal", icon: UserPlus },
+    { id: "account", label: "Account Dashboard", icon: UserCircle },
+    { id: "messages", label: "Messages", icon: MessageSquare, badge: unreadMessages },
+    { id: "notifications", label: "Notifications", icon: Bell },
     { id: "support", label: "Support & Inquiries", icon: LifeBuoy },
   ];
 
@@ -113,14 +137,21 @@ export default function Navbar({
               <button
                 key={item.id}
                 onClick={() => handleSelect(item.id)}
-                className={`w-full flex items-center gap-3.5 px-3.5 py-3 rounded-2xl text-sm font-bold transition-all ${
+                className={`w-full flex items-center justify-between px-3.5 py-3 rounded-2xl text-sm font-bold transition-all ${
                   isActive
                     ? "bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-950/40 font-black scale-[1.02]"
                     : "text-emerald-100 hover:bg-emerald-900/70 hover:text-white"
                 }`}
               >
-                <Icon className={`h-5 w-5 flex-shrink-0 ${isActive ? "text-slate-950" : "text-emerald-400"}`} />
-                <span className="truncate">{item.label}</span>
+                <div className="flex items-center gap-3.5 min-w-0">
+                  <Icon className={`h-5 w-5 flex-shrink-0 ${isActive ? "text-slate-950" : "text-emerald-400"}`} />
+                  <span className="truncate">{item.label}</span>
+                </div>
+                {item.badge ? (
+                  <span className="px-2 py-0.5 rounded-full bg-rose-500 text-white text-[10px] font-black flex-shrink-0">
+                    {item.badge}
+                  </span>
+                ) : null}
               </button>
             );
           })}

@@ -16,30 +16,33 @@ export default function RootLayout({
   const pathname = usePathname();
   const [checkingAuth, setCheckingAuth] = useState(true);
 
+  // Allow public paths AND any path starting with /admin without Firebase forced login
+  const isPublicOrAdmin = pathname.startsWith("/login") || 
+                          pathname.startsWith("/signup") || 
+                          pathname.startsWith("/admin");
+
   useEffect(() => {
-    const publicPaths = ["/login", "/signup"];
-
     const unsubscribe = onAuthStateChanged(auth, (user) => {
-      const isPublicPath = publicPaths.includes(pathname);
+      const isPublicPath = pathname === "/login" || pathname === "/signup";
+      const isAdminPath = pathname.startsWith("/admin");
 
-      if (!user && !isPublicPath) {
-        // Not logged in -> send to /login
+      if (!user && !isPublicOrAdmin) {
+        // Not logged in and trying to access protected routes -> send to /login
         router.replace("/login");
       } else if (user && isPublicPath) {
         // Already logged in and trying to access /login or /signup -> redirect to home
         router.replace("/");
       } else {
-        // Allowed: Logged in user visiting protected routes (/, /account, etc.)
-        // OR Unauthenticated user visiting /login or /signup
+        // Allowed: Logged in user visiting protected routes, OR accessing admin/public paths
         setCheckingAuth(false);
       }
     });
 
     return () => unsubscribe();
-  }, [pathname, router]);
+  }, [pathname, router, isPublicOrAdmin]);
 
-  // Loading screen while verifying member session
-  if (checkingAuth && !["/login", "/signup"].includes(pathname)) {
+  // Loading screen while verifying member session (exempting admin and public routes)
+  if (checkingAuth && !isPublicOrAdmin) {
     return (
       <html lang="en">
         <body className="bg-slate-950 text-white min-h-screen flex flex-col items-center justify-center font-sans">

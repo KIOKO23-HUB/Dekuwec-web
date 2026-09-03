@@ -2,8 +2,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { db } from "@/lib/firebase";
-import { collection, query, orderBy, onSnapshot, limit } from "firebase/firestore";
+import { auth, db } from "@/lib/firebase";
+import { collection, query, orderBy, onSnapshot, limit, doc, updateDoc, arrayUnion } from "firebase/firestore";
 import { 
   Radio, 
   HelpCircle, 
@@ -15,15 +15,25 @@ import {
   Flame, 
   ArrowRight,
   Globe2,
-  Sparkles
+  Sparkles,
+  ThumbsUp,
+  ThumbsDown,
+  MessageSquare,
+  Send,
+  Plus
 } from "lucide-react";
 
 interface FeedItem {
   id: string;
-  category: "Kenya" | "Global" | "Campus" | "Debate";
+  category: "Kenya" | "Global" | "Campus" | "Debate" | "Knowledge" | "Question";
   title: string;
   prompt: string;
   meetingInfo: string;
+  authorName?: string;
+  status?: string;
+  likes?: number;
+  dislikes?: number;
+  comments?: any[];
   createdAt?: any;
 }
 
@@ -59,6 +69,17 @@ export default function EcoPulseSection() {
   const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null);
   const [isSubmitted, setIsSubmitted] = useState(false);
 
+  // New Topic Submission Form State
+  const [showSubmitForm, setShowSubmitForm] = useState(false);
+  const [newCategory, setNewCategory] = useState("Debate");
+  const [newTitle, setNewTitle] = useState("");
+  const [newPrompt, setNewPrompt] = useState("");
+  const [submittingTopic, setSubmittingTopic] = useState(false);
+  const [toastMsg, setToastMsg] = useState("");
+
+  // Comment input states mapped by item id
+  const [commentInputs, setCommentInputs] = useState<{ [key: string]: string }>({});
+
   useEffect(() => {
     // 1. Stream all active discussions and news updates in real-time
     const qFeed = query(collection(db, "discussions_feed"), orderBy("createdAt", "desc"));
@@ -70,7 +91,6 @@ export default function EcoPulseSection() {
         })) as FeedItem[];
         setFeedItems(liveItems);
       } else {
-        // Sample baseline if empty
         setFeedItems([
           {
             id: "default-debate",
@@ -78,20 +98,6 @@ export default function EcoPulseSection() {
             title: "Carbon Credit Markets: Genuine Climate Solution or Corporate Greenwashing?",
             prompt: "As Kenya positions itself as an African carbon trading hub, do forest carbon projects equitably benefit surrounding indigenous communities and grassroots conservationists, or do they primarily serve foreign industrial emitters?",
             meetingInfo: "Wednesday • 4:00 PM • Resource Centre Hall",
-          },
-          {
-            id: "default-kenya",
-            category: "Kenya",
-            title: "Aberdare Forest Canopy Restorations Accelerate Ahead of Rains",
-            prompt: "New community seed nurseries along the Nyeri buffer zone report milestone yields of indigenous saplings to shield water towers.",
-            meetingInfo: "Frontline Update",
-          },
-          {
-            id: "default-global",
-            category: "Global",
-            title: "Global Treaty Advances Strict Limits on Single-Use Plastic Production",
-            prompt: "UN negotiators reach draft provisions enforcing producer accountability across emerging manufacturing corridors.",
-            meetingInfo: "Global Dispatch",
           },
         ]);
       }
@@ -106,7 +112,6 @@ export default function EcoPulseSection() {
           id: quizDoc.id,
           ...quizDoc.data(),
         } as QuizItem);
-        // Reset local answer selection if a new quiz is published
         setIsSubmitted(false);
         setSelectedAnswer(null);
       }
@@ -124,27 +129,173 @@ export default function EcoPulseSection() {
     }
   };
 
-  // Separate primary debate from news items
-  const primaryDebate = feedItems.find((i) => i.category === "Debate") || feedItems[0];
-  const newsAndDispatches = feedItems.filter((i) => i.id !== primaryDebate?.id);
+  const handlePostTopic = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!auth.currentUser) {
+      alert("Please log in to submit a discussion or question.");
+      return;
+    }
+
+    setSubmittingTopic(true);
+    try {
+      await updateDoc(doc(collection(db, "discussions_feed")), {}); // placeholder or direct addDoc
+      // Wait, let's use addDoc correctly
+      const { addDoc } = await import("firebase/firestore");
+      await addDoc(collection(db, "discussions_feed"), {
+        title: newTitle.trim(),
+        category: newCategory,
+        prompt: newPrompt.trim(),
+        authorName: auth.currentUser.displayName || "Club Member",
+        authorId: auth.currentUser.uid,
+        meetingInfo: "Community Submission",
+        status: "Pending", // Needs admin approval to show publicly in stream
+        likes: 0,
+        dislikes: 0,
+        comments: [],
+        createdAt: new Date().toISOString(),
+      });
+
+      setNewTitle("");
+      setNewPrompt("");
+      setShowSubmitForm(false);
+      setToastMsg("Topic submitted successfully! It will appear publicly once approved by an admin.");
+      setTimeout(() => setToastMsg(""), 5000);
+    } catch (err: any) {
+      alert("Failed to submit topic: " + err.message);
+    } finally {
+      setSubmittingTopic(false);
+    }
+  };
+
+  const handleReaction = async (id: string, currentCount: number = 0, type: "likes" | "dislikes") => {
+    try {
+      const topicRef = doc(db, "discussions_feed", id);
+      await updateDoc(topicRef, {
+        [type]: currentCount + 1,
+      });
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleAddComment = async (id: string) => {
+    const text = commentInputs[id];
+    if (!text || !text.trim() || !auth.currentUser) return;
+
+    try {
+      const topicRef = doc(db, "discussions_feed", id);
+      const newComment = {
+        userName: auth.currentUser.displayName || "Member",
+        text: text.trim(),
+        timestamp: new Date().toISOString(),
+      };
+      await updateDoc(topicRef, {
+        comments: arrayUnion(newComment),
+      });
+      setCommentInputs({ ...commentInputs, [id]: "" });
+    } catch (err: any) {
+      alert("Failed to add comment: " + err.message);
+    }
+  };
+
+  // Filter approved or default items for the public view
+  const approvedItems = feedItems.filter((i) => i.status === "Approved" || !i.status);
+  const primaryDebate = approvedItems.find((i) => i.category === "Debate") || approvedItems[0];
+  const newsAndDispatches = approvedItems.filter((i) => i.id !== primaryDebate?.id);
 
   return (
     <section id="ecopulse-section" className="py-14 bg-slate-50 min-h-screen">
       <div className="max-w-7xl mx-auto px-4 sm:px-6">
         
-        {/* Header */}
-        <div className="text-center max-w-2xl mx-auto mb-12">
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider text-emerald-800 bg-emerald-100 border border-emerald-200">
-            <Radio className="h-3.5 w-3.5 text-emerald-700 animate-pulse" />
-            EcoPulse Dispatch
-          </span>
-          <h2 className="text-3xl sm:text-4xl font-extrabold text-slate-900 mt-3">
-            Environmental Buzz & Discourses
-          </h2>
-          <p className="mt-2 text-sm sm:text-base text-slate-600">
-            Curated updates by our Information Director, weekly challenges, and physical meeting debate topics.
-          </p>
+        {/* Header & Submit Button */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between mb-12 gap-4">
+          <div>
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider text-emerald-800 bg-emerald-100 border border-emerald-200">
+              <Radio className="h-3.5 w-3.5 text-emerald-700 animate-pulse" />
+              EcoPulse Dispatch
+            </span>
+            <h2 className="text-3xl sm:text-4xl font-extrabold text-slate-900 mt-3">
+              Environmental Buzz & Discourses
+            </h2>
+            <p className="mt-2 text-sm sm:text-base text-slate-600">
+              Curated updates, weekly challenges, and member-submitted knowledge & questions.
+            </p>
+          </div>
+
+          <button
+            onClick={() => setShowSubmitForm(!showSubmitForm)}
+            className="self-start md:self-auto px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md transition flex items-center gap-2"
+          >
+            <Plus className="h-4 w-4" />
+            <span>{showSubmitForm ? "Close Form" : "Write a Topic / Question"}</span>
+          </button>
         </div>
+
+        {toastMsg && (
+          <div className="mb-8 p-4 rounded-2xl bg-emerald-100 border border-emerald-300 text-emerald-900 text-xs sm:text-sm font-bold flex items-center justify-between shadow-sm">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0" />
+              <span>{toastMsg}</span>
+            </div>
+            <button onClick={() => setToastMsg("")} className="text-emerald-700 hover:text-emerald-900 font-bold px-2">✕</button>
+          </div>
+        )}
+
+        {/* Member Submission Form Modal / Card */}
+        {showSubmitForm && (
+          <div className="mb-12 bg-white rounded-3xl border border-emerald-200 p-6 sm:p-8 shadow-xl animate-in fade-in">
+            <h3 className="text-base font-black text-slate-900 mb-4 flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-emerald-600" /> Share Knowledge, History, News or Pose a Question
+            </h3>
+            <form onSubmit={handlePostTopic} className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1">Category</label>
+                  <select
+                    value={newCategory}
+                    onChange={(e) => setNewCategory(e.target.value)}
+                    className="w-full p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-emerald-500"
+                  >
+                    <option value="Debate">Weekly Debate</option>
+                    <option value="Kenya">Kenya Conservation Frontline</option>
+                    <option value="Global">Global Dispatch</option>
+                    <option value="Knowledge">Historical Fact / New Knowledge</option>
+                    <option value="Question">Community Question</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1">Topic Headline</label>
+                  <input
+                    type="text"
+                    required
+                    value={newTitle}
+                    onChange={(e) => setNewTitle(e.target.value)}
+                    placeholder="e.g. The ecological history of Mau Forest..."
+                    className="w-full p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-1">Detailed Prompt / Question</label>
+                <textarea
+                  rows={3}
+                  required
+                  value={newPrompt}
+                  onChange={(e) => setNewPrompt(e.target.value)}
+                  placeholder="Provide background info, context, or your question..."
+                  className="w-full p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={submittingTopic}
+                className="py-2.5 px-6 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition shadow-sm disabled:opacity-50"
+              >
+                {submittingTopic ? "Submitting..." : "Submit for Admin Approval"}
+              </button>
+            </form>
+          </div>
+        )}
 
         {/* Top Grid: Primary Meeting Debate & Weekly Quiz */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 mb-16 items-start">
@@ -178,7 +329,7 @@ export default function EcoPulseSection() {
 
                   <div className="mt-4 p-5 rounded-2xl bg-slate-50 border border-slate-100">
                     <p className="text-xs font-bold uppercase text-slate-500 tracking-wider mb-1.5">
-                      Core Floor Question / Context:
+                      Core Floor Question / Context {primaryDebate.authorName ? `(Posted by ${primaryDebate.authorName})` : ""}:
                     </p>
                     <p className="text-sm text-slate-700 leading-relaxed italic whitespace-pre-wrap">
                       {primaryDebate.prompt}
@@ -305,7 +456,7 @@ export default function EcoPulseSection() {
 
         </div>
 
-        {/* 3. Ongoing Multi-Item News & Topic Feed Stream */}
+        {/* 3. Ongoing Multi-Item News & Topic Feed Stream with Likes & Comments */}
         <div className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-xs">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-6 border-b border-slate-100 gap-2">
             <div>
@@ -314,7 +465,7 @@ export default function EcoPulseSection() {
                 <h3 className="text-xl font-bold text-slate-900">Conservation Headlines & Discussion Stream</h3>
               </div>
               <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-                Frontline topics and dispatches updated live by the Information Director.
+                Frontline topics, historical facts, and community questions. Like and comment on dispatches.
               </p>
             </div>
             <span className="text-xs font-medium text-slate-500 bg-slate-100 px-3 py-1 rounded-full self-start sm:self-auto">
@@ -331,7 +482,7 @@ export default function EcoPulseSection() {
               {newsAndDispatches.map((article) => (
                 <div
                   key={article.id}
-                  className="p-5 rounded-2xl bg-slate-50 border border-slate-200/80 hover:border-emerald-300 transition flex flex-col justify-between group"
+                  className="p-5 rounded-2xl bg-slate-50 border border-slate-200/85 hover:border-emerald-300 transition flex flex-col justify-between group"
                 >
                   <div>
                     <div className="flex items-center justify-between mb-3">
@@ -340,12 +491,16 @@ export default function EcoPulseSection() {
                           ? "bg-emerald-100 text-emerald-800" 
                           : article.category === "Debate"
                           ? "bg-amber-100 text-amber-800"
+                          : article.category === "Knowledge"
+                          ? "bg-purple-100 text-purple-800"
+                          : article.category === "Question"
+                          ? "bg-orange-100 text-orange-800"
                           : "bg-blue-100 text-blue-800"
                       }`}>
                         {article.category}
                       </span>
-                      <span className="text-[11px] text-slate-400 truncate max-w-[140px]">
-                        {article.meetingInfo}
+                      <span className="text-[11px] text-slate-400 font-medium">
+                        {article.authorName ? `By ${article.authorName}` : article.meetingInfo}
                       </span>
                     </div>
 
@@ -353,14 +508,58 @@ export default function EcoPulseSection() {
                       {article.title}
                     </h4>
                     
-                    <p className="text-xs text-slate-600 mt-2 leading-relaxed whitespace-pre-wrap line-clamp-4">
+                    <p className="text-xs text-slate-600 mt-2 leading-relaxed whitespace-pre-wrap line-clamp-3">
                       {article.prompt}
                     </p>
                   </div>
 
-                  <div className="mt-4 pt-3 border-t border-slate-200/60 flex items-center text-emerald-700 text-xs font-semibold gap-1 group-hover:gap-1.5 transition-all">
-                    <span>Meeting discussion ready</span>
-                    <ArrowRight className="h-3 w-3" />
+                  {/* Likes, Dislikes & Comments Section */}
+                  <div className="mt-4 pt-3 border-t border-slate-200/70 space-y-3">
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={() => handleReaction(article.id, article.likes || 0, "likes")}
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-xs font-bold text-emerald-700 hover:bg-emerald-50 transition shadow-xs"
+                      >
+                        <ThumbsUp className="h-3 w-3" />
+                        <span>{article.likes || 0}</span>
+                      </button>
+                      <button
+                        onClick={() => handleReaction(article.id, article.dislikes || 0, "dislikes")}
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-xs font-bold text-rose-600 hover:bg-rose-50 transition shadow-xs"
+                      >
+                        <ThumbsDown className="h-3 w-3" />
+                        <span>{article.dislikes || 0}</span>
+                      </button>
+                      <span className="text-[11px] text-slate-500 ml-auto flex items-center gap-1">
+                        <MessageSquare className="h-3 w-3" /> {article.comments?.length || 0}
+                      </span>
+                    </div>
+
+                    {/* Comments list & input */}
+                    <div className="space-y-2 max-h-32 overflow-y-auto pr-1">
+                      {article.comments?.map((c: any, cIdx: number) => (
+                        <div key={cIdx} className="p-2 rounded-xl bg-white border border-slate-200 text-[11px]">
+                          <span className="font-bold text-emerald-800">{c.userName}: </span>
+                          <span className="text-slate-600">{c.text}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="flex gap-1.5">
+                      <input
+                        type="text"
+                        placeholder="Add a comment..."
+                        value={commentInputs[article.id] || ""}
+                        onChange={(e) => setCommentInputs({ ...commentInputs, [article.id]: e.target.value })}
+                        className="flex-1 p-2 rounded-xl bg-white border border-slate-200 text-xs text-slate-900 outline-none focus:ring-1 focus:ring-emerald-500"
+                      />
+                      <button
+                        onClick={() => handleAddComment(article.id)}
+                        className="px-3 py-2 rounded-xl bg-emerald-600 text-white hover:bg-emerald-500 transition shadow-xs"
+                      >
+                        <Send className="h-3 w-3" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}

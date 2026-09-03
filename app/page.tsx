@@ -8,7 +8,10 @@ import EcoPulseSection from "@/components/EcoPulseSection";
 import NatureSnapsSection from "@/components/NatureSnapsSection";
 import MembershipSection from "@/components/MembershipSection";
 import SupportSection from "@/components/SupportSection";
-import { db } from "@/lib/firebase";
+import AccountPage from "@/app/account/page";
+import MessagesTab from "@/components/MessagesTab";
+import NotificationsTab from "@/components/NotificationsTab";
+import { db, auth } from "@/lib/firebase";
 import { 
   collection, 
   query, 
@@ -17,7 +20,8 @@ import {
   doc, 
   setDoc, 
   updateDoc, 
-  increment 
+  increment,
+  where 
 } from "firebase/firestore";
 import { 
   Heart, 
@@ -30,7 +34,9 @@ import {
   Compass, 
   Sprout, 
   ChevronLeft, 
-  ChevronRight 
+  ChevronRight,
+  MessageSquare,
+  Bell
 } from "lucide-react";
 
 const LOGO_URL = "https://i.postimg.cc/HLsfSHMm/Whats-App-Image-2026-09-03-at-09-49-04.jpg";
@@ -79,12 +85,29 @@ export default function Home() {
   const [currentSlide, setCurrentSlide] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
 
+  // Unread message count state for top bar pill
+  const [unreadMessages, setUnreadMessages] = useState(0);
+
   // Likes Counter State
   const [likesCount, setLikesCount] = useState<number>(128);
   const [hasLiked, setHasLiked] = useState<boolean>(false);
   const [likeAnimating, setLikeAnimating] = useState(false);
 
-  // 1. Sync Live Uploaded Images into Hero Slider
+  // 1. Sync Unread Messages Count
+  useEffect(() => {
+    if (!auth.currentUser) return;
+    const q = query(
+      collection(db, "member_messages"),
+      where("recipientUid", "==", auth.currentUser.uid),
+      where("read", "==", false)
+    );
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setUnreadMessages(snapshot.size);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // 2. Sync Live Uploaded Images into Hero Slider
   useEffect(() => {
     const qEvents = query(collection(db, "events"), orderBy("createdAt", "desc"));
     const qSnaps = query(collection(db, "nature_snaps"), orderBy("createdAt", "desc"));
@@ -147,7 +170,7 @@ export default function Home() {
     };
   }, []);
 
-  // 2. Sync Likes Counter
+  // 3. Sync Likes Counter
   useEffect(() => {
     const liked = localStorage.getItem("dekuwec_site_liked") === "true";
     setHasLiked(liked);
@@ -219,7 +242,7 @@ export default function Home() {
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 lg:pl-72">
         
-        {/* Top App Header */}
+        {/* Top App Header with Messages, Notifications & Likes */}
         <header className="sticky top-0 z-30 bg-white/90 backdrop-blur-md border-b border-slate-200 px-4 sm:px-8 py-3.5 flex items-center justify-between shadow-xs">
           <div className="flex items-center gap-3">
             <button
@@ -243,6 +266,9 @@ export default function Home() {
                   {activeTab === "ecopulse" && "EcoPulse News & Debates"}
                   {activeTab === "snaps" && "Nature Snaps Wall"}
                   {activeTab === "membership" && "Club Membership"}
+                  {activeTab === "account" && "Account Dashboard"}
+                  {activeTab === "messages" && "Direct Messages"}
+                  {activeTab === "notifications" && "Global Notifications"}
                   {activeTab === "support" && "Help & Inquiries"}
                 </h2>
                 <p className="text-[11px] text-emerald-700 font-bold mt-0.5">
@@ -252,11 +278,44 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Real-time Like Pill */}
-          <div className="flex items-center gap-2.5">
+          {/* Top Bar Right Actions: Messages, Notifications, and Likes */}
+          <div className="flex items-center gap-2 sm:gap-3">
+            
+            {/* Messages Button */}
+            <button
+              onClick={() => setActiveTab("messages")}
+              className={`relative p-2 rounded-xl border transition flex items-center justify-center ${
+                activeTab === "messages"
+                  ? "bg-emerald-500 text-slate-950 border-emerald-600 shadow-sm"
+                  : "bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200"
+              }`}
+              title="Direct Messages"
+            >
+              <MessageSquare className="h-4 w-4" />
+              {unreadMessages > 0 && (
+                <span className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-rose-500 text-white text-[9px] font-black flex items-center justify-center shadow-xs animate-pulse">
+                  {unreadMessages}
+                </span>
+              )}
+            </button>
+
+            {/* Notifications Button */}
+            <button
+              onClick={() => setActiveTab("notifications")}
+              className={`p-2 rounded-xl border transition flex items-center justify-center ${
+                activeTab === "notifications"
+                  ? "bg-emerald-500 text-slate-950 border-emerald-600 shadow-sm"
+                  : "bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200"
+              }`}
+              title="Global Notifications"
+            >
+              <Bell className="h-4 w-4" />
+            </button>
+
+            {/* Like Pill */}
             <button
               onClick={handleLikeToggle}
-              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-bold transition-all border ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${
                 hasLiked
                   ? "bg-rose-50 text-rose-600 border-rose-200 shadow-xs"
                   : "bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200"
@@ -269,9 +328,6 @@ export default function Home() {
                 }`}
               />
               <span className="font-extrabold">{likesCount.toLocaleString()}</span>
-              <span className="hidden sm:inline font-medium text-slate-500">
-                {hasLiked ? "Liked" : "Likes"}
-              </span>
             </button>
           </div>
         </header>
@@ -460,6 +516,9 @@ export default function Home() {
           {activeTab === "ecopulse" && <EcoPulseSection />}
           {activeTab === "snaps" && <NatureSnapsSection />}
           {activeTab === "membership" && <MembershipSection />}
+          {activeTab === "account" && <AccountPage />}
+          {activeTab === "messages" && <MessagesTab />}
+          {activeTab === "notifications" && <NotificationsTab />}
           {activeTab === "support" && <SupportSection />}
         </main>
 

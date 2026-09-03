@@ -4,9 +4,10 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { auth, db } from "@/lib/firebase";
+import { auth, db, storage } from "@/lib/firebase";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
+import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 import {
   User,
   Mail,
@@ -20,12 +21,18 @@ import {
   Send,
   X,
   Sparkles,
+  UploadCloud,
+  Loader2,
+  BookOpen,
+  ShieldCheck
 } from "lucide-react";
 
 interface MemberRecord {
   displayName: string;
   email: string;
   year: string;
+  course: string;
+  photoURL: string;
   status: "Unregistered" | "Pending" | "Approved" | "Rejected";
 }
 
@@ -35,19 +42,24 @@ export default function AccountPage() {
   const [loading, setLoading] = useState(true);
   const [submittingModal, setSubmittingModal] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [savingProfile, setSavingProfile] = useState(false);
   const [notification, setNotification] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
   const [member, setMember] = useState<MemberRecord>({
     displayName: "",
     email: "",
     year: "Year 1",
+    course: "",
+    photoURL: "",
     status: "Unregistered",
   });
 
-  // Modal form state
+  // Modal / Edit form state
   const [modalName, setModalName] = useState("");
   const [modalEmail, setModalEmail] = useState("");
   const [modalYear, setModalYear] = useState("Year 1");
+  const [modalCourse, setModalCourse] = useState("");
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -67,17 +79,22 @@ export default function AccountPage() {
             displayName: data.displayName || user.displayName || "",
             email: data.email || user.email || "",
             year: data.year || "Year 1",
+            course: data.course || "",
+            photoURL: data.photoURL || user.photoURL || "",
             status: data.status || "Unregistered",
           };
           setMember(loadedMember);
           setModalName(loadedMember.displayName);
           setModalEmail(loadedMember.email);
           setModalYear(loadedMember.year);
+          setModalCourse(loadedMember.course);
         } else {
           setMember({
             displayName: user.displayName || "",
             email: user.email || "",
             year: "Year 1",
+            course: "",
+            photoURL: user.photoURL || "",
             status: "Unregistered",
           });
           setModalName(user.displayName || "");
@@ -93,6 +110,72 @@ export default function AccountPage() {
     return () => unsubscribe();
   }, [router]);
 
+  // Handle Photo Upload to Firebase Storage & sync to Firestore
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !uid) return;
+
+    setUploadingPhoto(true);
+    setNotification(null);
+
+    try {
+      const fileRef = ref(storage, `member_avatars/${uid}_${Date.now()}`);
+      const uploadTask = uploadBytesResumable(fileRef, file);
+
+      uploadTask.on(
+        "state_changed",
+        null,
+        (error) => {
+          setNotification({ type: "error", message: "Failed to upload photo: " + error.message });
+          setUploadingPhoto(false);
+        },
+        async () => {
+          const downloadUrl = await getDownloadURL(uploadTask.snapshot.ref);
+          await updateDoc(doc(db, "members", uid), {
+            photoURL: downloadUrl,
+          });
+
+          setMember((prev) => ({ ...prev, photoURL: downloadUrl }));
+          setUploadingPhoto(false);
+          setNotification({ type: "success", message: "Profile picture updated and published to the membership directory!" });
+        }
+      );
+    } catch (err: any) {
+      setNotification({ type: "error", message: err.message });
+      setUploadingPhoto(false);
+    }
+  };
+
+  // Save profile edits (Name, Course, Year)
+  const handleSaveProfileDetails = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!uid) return;
+
+    setSavingProfile(true);
+    setNotification(null);
+
+    try {
+      await updateDoc(doc(db, "members", uid), {
+        displayName: modalName.trim(),
+        course: modalCourse.trim(),
+        year: modalYear,
+      });
+
+      setMember((prev) => ({
+        ...prev,
+        displayName: modalName.trim(),
+        course: modalCourse.trim(),
+        year: modalYear,
+      }));
+
+      setNotification({ type: "success", message: "Profile details updated successfully!" });
+    } catch (err: any) {
+      setNotification({ type: "error", message: "Failed to update profile details." });
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
   const handleMembershipSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!uid) return;
@@ -101,17 +184,16 @@ export default function AccountPage() {
     setNotification(null);
 
     try {
-      // 1. Update Firestore status to Pending
       const docRef = doc(db, "members", uid);
       await updateDoc(docRef, {
         displayName: modalName.trim(),
         email: modalEmail.trim(),
         year: modalYear,
+        course: modalCourse.trim(),
         status: "Pending",
         appliedAt: new Date().toISOString(),
       });
 
-      // 2. Dispatch email with payment instructions to the user's email
       await fetch("/api/send-verification", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -127,13 +209,14 @@ export default function AccountPage() {
         displayName: modalName.trim(),
         email: modalEmail.trim(),
         year: modalYear,
+        course: modalCourse.trim(),
         status: "Pending",
       }));
 
       setIsModalOpen(false);
       setNotification({
         type: "success",
-        message: "Application submitted!  verification instructions have been sent to your email.",
+        message: "Application submitted! Verification instructions have been sent to your email.",
       });
     } catch (err: any) {
       console.error(err);
@@ -242,43 +325,128 @@ export default function AccountPage() {
           </div>
         )}
 
-        {/* Profile Card */}
+        {/* Profile Card & Editable Info */}
         <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 space-y-6">
-          <div className="flex items-center gap-4">
-            <div className="h-14 w-14 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 text-xl font-black">
-              {member.displayName ? member.displayName.charAt(0).toUpperCase() : "M"}
+          <div className="flex flex-col sm:flex-row items-center gap-6 pb-6 border-b border-slate-800">
+            <div className="relative group">
+              <div className="h-24 w-24 rounded-2xl overflow-hidden bg-slate-800 border-2 border-emerald-500/50 flex items-center justify-center">
+                {member.photoURL ? (
+                  <img src={member.photoURL} alt="Avatar" className="h-full w-full object-cover" />
+                ) : (
+                  <span className="text-2xl font-black text-emerald-400">
+                    {member.displayName ? member.displayName[0].toUpperCase() : "M"}
+                  </span>
+                )}
+              </div>
+              <label className="absolute inset-0 bg-slate-950/60 opacity-0 group-hover:opacity-100 transition flex flex-col items-center justify-center cursor-pointer rounded-2xl text-[10px] font-bold text-white">
+                <UploadCloud className="h-5 w-5 mb-1 text-emerald-400" />
+                <span>{uploadingPhoto ? "Uploading..." : "Change Photo"}</span>
+                <input type="file" accept="image/*" className="hidden" onChange={handlePhotoUpload} />
+              </label>
             </div>
-            <div>
-              <h2 className="text-lg font-bold text-white">Member Profile</h2>
-              <p className="text-xs text-slate-400">Account details on file</p>
-            </div>
-          </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
-            <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800">
-              <span className="text-[10px] font-bold uppercase text-slate-500">Official Name</span>
-              <p className="text-sm font-medium text-slate-200 mt-0.5">{member.displayName || "Not set"}</p>
-            </div>
-            <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800">
-              <span className="text-[10px] font-bold uppercase text-slate-500">Email Address</span>
-              <p className="text-sm font-medium text-slate-200 mt-0.5">{member.email || "Not set"}</p>
-            </div>
-            <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800">
-              <span className="text-[10px] font-bold uppercase text-slate-500">Year of Study</span>
-              <p className="text-sm font-medium text-slate-200 mt-0.5">{member.year || "Year 1"}</p>
-            </div>
-            <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800">
-              <span className="text-[10px] font-bold uppercase text-slate-500">Membership Status</span>
-              <p className="text-sm font-bold text-emerald-400 mt-0.5">
-                {member.status === "Approved" ? "Approved" : member.status === "Pending" ? "Pending Approval" : "Not a Registered Member"}
+            <div className="text-center sm:text-left">
+              <div className="flex items-center justify-center sm:justify-start gap-2">
+                <h2 className="text-lg font-black text-white">{member.displayName || "Member"}</h2>
+                <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                  member.status === "Approved" ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30" : "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                }`}>
+                  {member.status}
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 mt-1">{member.email}</p>
+              <p className="text-[11px] text-emerald-400 font-medium mt-2">
+                Hover over your avatar to update your picture. It is visible to everyone in the Membership Portal.
               </p>
             </div>
           </div>
+
+          {/* Edit Profile Form */}
+          <form onSubmit={handleSaveProfileDetails} className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-300 mb-1.5">
+                  Full Official Name
+                </label>
+                <div className="relative">
+                  <User className="absolute left-3.5 top-3 h-4 w-4 text-slate-500" />
+                  <input
+                    type="text"
+                    required
+                    value={modalName}
+                    onChange={(e) => setModalName(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-sm focus:border-emerald-500 outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-300 mb-1.5">
+                  Email (Read-Only)
+                </label>
+                <div className="relative">
+                  <Mail className="absolute left-3.5 top-3 h-4 w-4 text-slate-500" />
+                  <input
+                    type="email"
+                    disabled
+                    value={member.email}
+                    className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-950/50 border border-slate-800/50 text-slate-500 text-sm cursor-not-allowed"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-300 mb-1.5">
+                  Academic Course
+                </label>
+                <div className="relative">
+                  <BookOpen className="absolute left-3.5 top-3 h-4 w-4 text-slate-500" />
+                  <input
+                    type="text"
+                    required
+                    value={modalCourse}
+                    onChange={(e) => setModalCourse(e.target.value)}
+                    placeholder="e.g. Mechanical Engineering"
+                    className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-sm focus:border-emerald-500 outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-300 mb-1.5">
+                  Year of Study
+                </label>
+                <div className="relative">
+                  <GraduationCap className="absolute left-3.5 top-3 h-4 w-4 text-slate-500 pointer-events-none" />
+                  <select
+                    value={modalYear}
+                    onChange={(e) => setModalYear(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-sm focus:border-emerald-500 outline-none appearance-none"
+                  >
+                    <option value="Year 1">Year 1</option>
+                    <option value="Year 2">Year 2</option>
+                    <option value="Year 3">Year 3</option>
+                    <option value="Year 4">Year 4</option>
+                    <option value="Year 5">Year 5</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={savingProfile}
+              className="py-3 px-6 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-sm transition flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              {savingProfile ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+              <span>Save Account Changes</span>
+            </button>
+          </form>
         </div>
 
       </div>
 
-      {/* Verification Modal (Only Name, Email, and Year) */}
+      {/* Verification Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
           <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl relative">
@@ -326,6 +494,23 @@ export default function AccountPage() {
                     value={modalEmail}
                     onChange={(e) => setModalEmail(e.target.value)}
                     placeholder="student@dkut.ac.ke"
+                    className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-sm focus:border-emerald-500 outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-300 mb-1.5">
+                  Academic Course
+                </label>
+                <div className="relative">
+                  <BookOpen className="absolute left-3.5 top-3 h-4 w-4 text-slate-500" />
+                  <input
+                    type="text"
+                    required
+                    value={modalCourse}
+                    onChange={(e) => setModalCourse(e.target.value)}
+                    placeholder="e.g. Mechanical Engineering"
                     className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-sm focus:border-emerald-500 outline-none"
                   />
                 </div>

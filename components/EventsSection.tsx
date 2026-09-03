@@ -2,9 +2,9 @@
 "use client";
 
 import { useRef, useState, useEffect } from "react";
-import { db } from "@/lib/firebase";
-import { collection, query, orderBy, onSnapshot } from "firebase/firestore";
-import { ChevronLeft, ChevronRight, Calendar, ExternalLink, MapPin } from "lucide-react";
+import { auth, db } from "@/lib/firebase";
+import { collection, query, orderBy, onSnapshot, doc, setDoc, getDoc, deleteDoc } from "firebase/firestore";
+import { ChevronLeft, ChevronRight, Calendar, ExternalLink, MapPin, CheckCircle2, Users } from "lucide-react";
 
 export interface ClubEvent {
   id: string;
@@ -80,9 +80,11 @@ interface SliderProps {
   subtitle: string;
   badge: string;
   events: ClubEvent[];
+  participatingIds: { [key: string]: boolean };
+  onToggleParticipate: (event: ClubEvent) => void;
 }
 
-function EventSlider({ title, subtitle, badge, events }: SliderProps) {
+function EventSlider({ title, subtitle, badge, events, participatingIds, onToggleParticipate }: SliderProps) {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   const scroll = (direction: "left" | "right") => {
@@ -95,7 +97,6 @@ function EventSlider({ title, subtitle, badge, events }: SliderProps) {
     }
   };
 
-  // Helper to enforce max 12 words for statement
   const getTruncatedStatement = (text: string) => {
     if (!text) return "";
     const words = text.split(" ");
@@ -130,68 +131,90 @@ function EventSlider({ title, subtitle, badge, events }: SliderProps) {
         </div>
       </div>
 
-      {/* Horizontal Slider */}
       <div
         ref={scrollContainerRef}
         className="flex gap-6 overflow-x-auto pb-4 pt-1 snap-x snap-mandatory scrollbar-none"
         style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
       >
-        {events.map((evt) => (
-          <div
-            key={evt.id}
-            className="w-[300px] sm:w-[350px] flex-shrink-0 snap-start rounded-2xl overflow-hidden bg-white border border-slate-200 shadow-sm hover:shadow-md transition-all flex flex-col group"
-          >
-            {/* Poster / Image Container */}
-            <div className="relative h-52 w-full overflow-hidden bg-slate-100">
-              <img
-                src={evt.imageUrl}
-                alt={evt.title}
-                className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/30 to-transparent"></div>
+        {events.map((evt) => {
+          const isParticipating = participatingIds[evt.id];
+          return (
+            <div
+              key={evt.id}
+              className="w-[300px] sm:w-[350px] flex-shrink-0 snap-start rounded-2xl overflow-hidden bg-white border border-slate-200 shadow-sm hover:shadow-md transition-all flex flex-col group"
+            >
+              <div className="relative h-52 w-full overflow-hidden bg-slate-100">
+                <img
+                  src={evt.imageUrl}
+                  alt={evt.title}
+                  className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/30 to-transparent"></div>
 
-              {/* 12-Word Bold Statement Overlay */}
-              <div className="absolute bottom-3 left-4 right-4">
-                <p className="text-sm font-extrabold text-white leading-snug drop-shadow-md">
-                  "{getTruncatedStatement(evt.statement12Words)}"
-                </p>
-              </div>
-            </div>
-
-            {/* Event Details */}
-            <div className="p-5 flex flex-col flex-grow justify-between">
-              <div>
-                <h4 className="text-lg font-bold text-slate-900 group-hover:text-emerald-700 transition">
-                  {evt.title}
-                </h4>
-                <div className="mt-3 space-y-1.5 text-xs text-slate-500">
-                  <div className="flex items-center gap-2">
-                    <Calendar className="h-3.5 w-3.5 text-emerald-600" />
-                    <span>{evt.date}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <MapPin className="h-3.5 w-3.5 text-emerald-600" />
-                    <span>{evt.venue}</span>
-                  </div>
+                <div className="absolute bottom-3 left-4 right-4">
+                  <p className="text-sm font-extrabold text-white leading-snug drop-shadow-md">
+                    "{getTruncatedStatement(evt.statement12Words)}"
+                  </p>
                 </div>
               </div>
 
-              {evt.externalLink && (
-                <div className="mt-4 pt-3 border-t border-slate-100">
-                  <a
-                    href={evt.externalLink}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 hover:text-emerald-800"
-                  >
-                    <span>View Highlights & Gallery</span>
-                    <ExternalLink className="h-3.5 w-3.5" />
-                  </a>
+              <div className="p-5 flex flex-col flex-grow justify-between">
+                <div>
+                  <h4 className="text-lg font-bold text-slate-900 group-hover:text-emerald-700 transition">
+                    {evt.title}
+                  </h4>
+                  <div className="mt-3 space-y-1.5 text-xs text-slate-500">
+                    <div className="flex items-center gap-2">
+                      <Calendar className="h-3.5 w-3.5 text-emerald-600" />
+                      <span>{evt.date}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <MapPin className="h-3.5 w-3.5 text-emerald-600" />
+                      <span>{evt.venue}</span>
+                    </div>
+                  </div>
                 </div>
-              )}
+
+                <div className="mt-5 pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
+                  {evt.type === "upcoming" ? (
+                    <button
+                      onClick={() => onToggleParticipate(evt)}
+                      className={`w-full py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+                        isParticipating
+                          ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                          : "bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm"
+                      }`}
+                    >
+                      {isParticipating ? (
+                        <>
+                          <CheckCircle2 className="h-4 w-4 text-emerald-700" />
+                          <span>Participating (Click to Cancel)</span>
+                        </>
+                      ) : (
+                        <>
+                          <Users className="h-4 w-4" />
+                          <span>Want to Participate</span>
+                        </>
+                      )}
+                    </button>
+                  ) : (
+                    evt.externalLink && (
+                      <a
+                        href={evt.externalLink}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 hover:text-emerald-800"
+                      >
+                        <span>View Highlights & Gallery</span>
+                        <ExternalLink className="h-3.5 w-3.5" />
+                      </a>
+                    )
+                  )}
+                </div>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -200,11 +223,13 @@ function EventSlider({ title, subtitle, badge, events }: SliderProps) {
 export default function EventsSection() {
   const [upcomingEvents, setUpcomingEvents] = useState<ClubEvent[]>(SAMPLE_UPCOMING);
   const [previousEvents, setPreviousEvents] = useState<ClubEvent[]>(SAMPLE_PREVIOUS);
+  const [participatingIds, setParticipatingIds] = useState<{ [key: string]: boolean }>({});
+  const [successToast, setSuccessToast] = useState<string | null>(null);
 
   useEffect(() => {
-    // Listen to all events in Firestore sorted newest first
+    // 1. Listen to all events in Firestore sorted newest first
     const q = query(collection(db, "events"), orderBy("createdAt", "desc"));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+    const unsubscribeEvents = onSnapshot(q, (snapshot) => {
       if (!snapshot.empty) {
         const liveDocs = snapshot.docs.map((doc) => ({
           id: doc.id,
@@ -214,7 +239,6 @@ export default function EventsSection() {
         const liveUpcoming = liveDocs.filter((e) => e.type === "upcoming");
         const livePrevious = liveDocs.filter((e) => e.type === "previous");
 
-        // Use live data if present, otherwise keep fallback
         setUpcomingEvents(liveUpcoming.length > 0 ? liveUpcoming : SAMPLE_UPCOMING);
         setPreviousEvents(livePrevious.length > 0 ? livePrevious : SAMPLE_PREVIOUS);
       } else {
@@ -223,8 +247,60 @@ export default function EventsSection() {
       }
     });
 
-    return () => unsubscribe();
+    // 2. Listen to user's participations if logged in
+    let unsubscribeParticipations = () => {};
+    if (auth.currentUser) {
+      const partQuery = query(collection(db, "event_participants"));
+      unsubscribeParticipations = onSnapshot(partQuery, (snapshot) => {
+        const userMap: { [key: string]: boolean } = {};
+        snapshot.docs.forEach((docSnap) => {
+          const data = docSnap.data();
+          if (data.userId === auth.currentUser?.uid) {
+            userMap[data.eventId] = true;
+          }
+        });
+        setParticipatingIds(userMap);
+      });
+    }
+
+    return () => {
+      unsubscribeEvents();
+      unsubscribeParticipations();
+    };
   }, []);
+
+  const handleToggleParticipate = async (evt: ClubEvent) => {
+    if (!auth.currentUser) {
+      alert("Please log in to record your event participation.");
+      return;
+    }
+
+    const participantDocId = `${evt.id}_${auth.currentUser.uid}`;
+    const docRef = doc(db, "event_participants", participantDocId);
+
+    try {
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists()) {
+        // Cancel participation
+        await deleteDoc(docRef);
+        setSuccessToast(`Cancelled participation for "${evt.title}".`);
+      } else {
+        // Register participation
+        await setDoc(docRef, {
+          eventId: evt.id,
+          eventTitle: evt.title,
+          userId: auth.currentUser.uid,
+          userName: auth.currentUser.displayName || "Club Member",
+          userEmail: auth.currentUser.email || "",
+          timestamp: new Date().toISOString(),
+        });
+        setSuccessToast(`Successfully registered your interest for "${evt.title}"! Executive team notified.`);
+      }
+      setTimeout(() => setSuccessToast(null), 4000);
+    } catch (err: any) {
+      alert("Failed to update participation: " + err.message);
+    }
+  };
 
   return (
     <section id="events-section" className="py-12 bg-slate-50">
@@ -240,12 +316,24 @@ export default function EventsSection() {
           </p>
         </div>
 
+        {successToast && (
+          <div className="mb-8 p-4 rounded-2xl bg-emerald-100 border border-emerald-300 text-emerald-900 text-xs sm:text-sm font-bold flex items-center justify-between shadow-sm">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0" />
+              <span>{successToast}</span>
+            </div>
+            <button onClick={() => setSuccessToast(null)} className="text-emerald-700 hover:text-emerald-900 font-bold px-2">✕</button>
+          </div>
+        )}
+
         {/* 1. Upcoming Events Slider */}
         <EventSlider
           title="Upcoming Club Events"
-          subtitle="Join our next excursions, cleanups, and community gatherings."
+          subtitle="Join our next excursions, cleanups, and community gatherings. Click 'Want to Participate' to notify the admins."
           badge="In the Pipeline"
           events={upcomingEvents}
+          participatingIds={participatingIds}
+          onToggleParticipate={handleToggleParticipate}
         />
 
         {/* 2. Previous Events Slider */}
@@ -254,6 +342,8 @@ export default function EventsSection() {
           subtitle="Snapshots and records from earlier sessions this semester."
           badge="Completed Journeys"
           events={previousEvents}
+          participatingIds={participatingIds}
+          onToggleParticipate={handleToggleParticipate}
         />
 
         {/* 3. Link Archive for Previous Events */}
