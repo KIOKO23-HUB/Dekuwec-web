@@ -8,7 +8,9 @@ import {
   Camera, 
   UserPlus, 
   LifeBuoy, 
-  X
+  X,
+  Instagram,
+  Linkedin
 } from "lucide-react";
 
 interface NavbarProps {
@@ -19,6 +21,37 @@ interface NavbarProps {
 }
 
 const LOGO_URL = "https://i.postimg.cc/HLsfSHMm/Whats-App-Image-2026-09-03-at-09-49-04.jpg";
+
+export const SOCIAL_LINKS = [
+  {
+    name: "Instagram",
+    url: "https://www.instagram.com/wildlifeandenvironmentalclub/",
+    icon: Instagram,
+  },
+  {
+    name: "TikTok",
+    url: "https://www.tiktok.com/@dekuwec_dekut?_r=1&_t=ZS-99Q1Zs2LjYP",
+    customSvg: (
+      <svg className="h-4 w-4 fill-current" viewBox="0 0 24 24">
+        <path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-5.2 1.74 2.89 2.89 0 0 1 2.31-4.64c.298-.002.595.042.88.13V9.4a6.33 6.33 0 0 0-1-.08A6.34 6.34 0 0 0 3 15.66a6.34 6.34 0 0 0 10.82 4.49 6.27 6.27 0 0 0 1.87-4.49V8.62a8.28 8.28 0 0 0 5.2 1.83V7a4.84 4.84 0 0 1-1.3-.31z"/>
+      </svg>
+    ),
+  },
+  {
+    name: "LinkedIn",
+    url: "https://www.linkedin.com/in/dekut-wildlife-and-environment-club-dekuwec-99b43a341?utm_source=share_via&utm_content=profile&utm_medium=member_android",
+    icon: Linkedin,
+  },
+  {
+    name: "X",
+    url: "https://x.com/Dekut_WEC",
+    customSvg: (
+      <svg className="h-3.5 w-3.5 fill-current" viewBox="0 0 24 24">
+        <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+      </svg>
+    ),
+  },
+];
 
 export default function Navbar({
   activeTab,
@@ -43,11 +76,11 @@ export default function Navbar({
   const navContent = (
     <div className="flex flex-col h-full justify-between p-5">
       <div>
-        {/* Club Logo & Identity */}
+        {/* Brand Logo & Heading */}
         <div className="flex items-center gap-3.5 pb-6 border-b border-emerald-800/60">
           <img
             src={LOGO_URL}
-            alt="DEKUWEC Official Logo"
+            alt="DEKUWEC Logo"
             className="h-12 w-12 rounded-2xl object-cover ring-2 ring-emerald-400/50 shadow-md bg-white flex-shrink-0"
           />
           <div className="min-w-0">
@@ -60,7 +93,7 @@ export default function Navbar({
           </div>
         </div>
 
-        {/* Navigation Items */}
+        {/* Nav Links */}
         <nav className="mt-6 space-y-1.5">
           <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-400/70 px-3 mb-2">
             Navigation Menu
@@ -86,23 +119,38 @@ export default function Navbar({
         </nav>
       </div>
 
-      {/* Footer Branding */}
-      <div className="pt-4 border-t border-emerald-800/60">
-        <p className="text-[11px] text-emerald-300/80 text-center font-medium">
-          Conserve • Explore • Protect
+      {/* Social Media Channels in Sidebar */}
+      <div className="pt-5 border-t border-emerald-800/60">
+        <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-400/70 mb-3 text-center">
+          Join Community
         </p>
+        <div className="flex items-center justify-center gap-2">
+          {SOCIAL_LINKS.map((s) => {
+            const Icon = s.icon;
+            return (
+              <a
+                key={s.name}
+                href={s.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={s.name}
+                className="h-9 w-9 rounded-xl bg-emerald-900/80 hover:bg-emerald-500 hover:text-slate-950 text-emerald-300 flex items-center justify-center transition shadow-xs border border-emerald-700/50"
+              >
+                {Icon ? <Icon className="h-4 w-4" /> : s.customSvg}
+              </a>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
 
   return (
     <>
-      {/* Desktop Left-Hand Persistent Sidebar */}
       <aside className="hidden lg:flex w-72 flex-col fixed inset-y-0 left-0 z-40 bg-emerald-950 text-white border-r border-emerald-900 shadow-2xl">
         {navContent}
       </aside>
 
-      {/* Mobile Drawer Overlay */}
       {mobileMenuOpen && (
         <div className="fixed inset-0 z-50 lg:hidden">
           <div

@@ -463,17 +463,73 @@ export default function Home() {
           {activeTab === "support" && <SupportSection />}
         </main>
 
-        {/* Global Footer */}
+        {/* Global Footer with Social Channels */}
         <footer className="border-t border-slate-200 bg-white py-10 px-4 sm:px-8">
-          <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-6">
             <div className="flex items-center gap-3 text-emerald-900 font-bold text-sm">
               <img
                 src={LOGO_URL}
                 alt="DEKUWEC"
                 className="h-8 w-8 rounded-lg object-cover"
               />
-              <span>Dedan Kimathi Wildlife & Environmental Club (DEKUWEC)</span>
+              <span>Dedan Kimathi Wildlife & Environmental Club</span>
             </div>
+
+            {/* Social Icons Strip */}
+            <div className="flex items-center gap-3">
+              <a
+                href="https://www.instagram.com/wildlifeandenvironmentalclub/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="h-8 w-8 rounded-lg bg-slate-100 hover:bg-emerald-100 hover:text-emerald-700 text-slate-600 flex items-center justify-center transition border border-slate-200"
+                title="Instagram"
+              >
+                <svg className="h-4 w-4 fill-none stroke-current stroke-2" viewBox="0 0 24 24">
+                  <rect width="20" height="20" x="2" y="2" rx="5" ry="5"/>
+                  <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/>
+                  <line x1="17.5" x2="17.51" y1="6.5" y2="6.5"/>
+                </svg>
+              </a>
+
+              <a
+                href="https://www.tiktok.com/@dekuwec_dekut?_r=1&_t=ZS-99Q1Zs2LjYP"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="h-8 w-8 rounded-lg bg-slate-100 hover:bg-emerald-100 hover:text-emerald-700 text-slate-600 flex items-center justify-center transition border border-slate-200"
+                title="TikTok"
+              >
+                <svg className="h-4 w-4 fill-current" viewBox="0 0 24 24">
+                  <path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-5.2 1.74 2.89 2.89 0 0 1 2.31-4.64c.298-.002.595.042.88.13V9.4a6.33 6.33 0 0 0-1-.08A6.34 6.34 0 0 0 3 15.66a6.34 6.34 0 0 0 10.82 4.49 6.27 6.27 0 0 0 1.87-4.49V8.62a8.28 8.28 0 0 0 5.2 1.83V7a4.84 4.84 0 0 1-1.3-.31z"/>
+                </svg>
+              </a>
+
+              <a
+                href="https://www.linkedin.com/in/dekut-wildlife-and-environment-club-dekuwec-99b43a341?utm_source=share_via&utm_content=profile&utm_medium=member_android"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="h-8 w-8 rounded-lg bg-slate-100 hover:bg-emerald-100 hover:text-emerald-700 text-slate-600 flex items-center justify-center transition border border-slate-200"
+                title="LinkedIn"
+              >
+                <svg className="h-4 w-4 fill-none stroke-current stroke-2" viewBox="0 0 24 24">
+                  <path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"/>
+                  <rect width="4" height="12" x="2" y="9"/>
+                  <circle cx="4" cy="4" r="2"/>
+                </svg>
+              </a>
+
+              <a
+                href="https://x.com/Dekut_WEC"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="h-8 w-8 rounded-lg bg-slate-100 hover:bg-emerald-100 hover:text-emerald-700 text-slate-600 flex items-center justify-center transition border border-slate-200"
+                title="X"
+              >
+                <svg className="h-3.5 w-3.5 fill-current" viewBox="0 0 24 24">
+                  <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+                </svg>
+              </a>
+            </div>
+
             <p className="text-xs text-slate-500 text-center sm:text-right">
               © {new Date().getFullYear()} DEKUWEC • Dedan Kimathi University of Technology • All Rights Reserved.
             </p>
