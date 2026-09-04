@@ -1,24 +1,25 @@
 // lib/firebase.ts
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getFirestore } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
+import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 import { getAnalytics, isSupported } from "firebase/analytics";
 
 const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
-  measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID,
+  apiKey: "AIzaSyCxJUi5tTfWHDRQutRzswh59jzZ8-QQX_A",
+  authDomain: "dekuwec-web.firebaseapp.com",
+  databaseURL: "https://dekuwec-web-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "dekuwec-web",
+  storageBucket: "dekuwec-web.firebasestorage.app",
+  messagingSenderId: "34755257116",
+  appId: "1:34755257116:web:1c7cdd4e6d0e0e2a9f50d9",
+  measurementId: "G-65VMWYLY64"
 };
 
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 
-export const db = getFirestore(app);
 export const auth = getAuth(app);
+export const db = getFirestore(app);
 export const storage = getStorage(app);
 
 export let analytics: any = null;
