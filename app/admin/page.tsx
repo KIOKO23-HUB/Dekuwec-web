@@ -3,19 +3,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { db, storage } from "@/lib/mongodb";
-import { 
-  collection, 
-  addDoc, 
-  deleteDoc, 
-  doc, 
-  onSnapshot, 
-  query, 
-  orderBy, 
-  serverTimestamp,
-  updateDoc
-} from "firebase/firestore";
-import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
+import { useUser } from "@clerk/nextjs";
 import { 
   ShieldCheck, 
   Lock, 
@@ -27,29 +15,25 @@ import {
   CheckCircle2, 
   AlertCircle, 
   Loader2,
-  Trees,
   Trash2,
   UploadCloud,
   Globe2,
-  Plus,
   Users,
   Clock,
   UserCheck,
   UserX,
   Bell,
   Sparkles,
-  Copy,
-  Check,
-  PhoneCall,
   Image as ImageIcon,
   CheckSquare,
   XCircle
 } from "lucide-react";
 
-const CLUB_LOGO_URL = "https://i.postimg.cc/qB9gLwmz/Whats-App-Image-2026-09-03-at-09-49-04.jpg";
+const CLUB_LOGO_URL = "https://i.postimg.cc/HLsfSHMm/Whats-App-Image-2026-09-03-at-09-49-04.jpg";
 const DEKUT_LOGO_URL = "https://i.postimg.cc/Xq84V1xK/Dekut-logo.jpg";
 
 export default function AdminDashboard() {
+  const { user } = useUser();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [passkey, setPasskey] = useState("");
   const [authError, setAuthError] = useState(false);
@@ -65,7 +49,7 @@ export default function AdminDashboard() {
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // --- Realtime Data Stores ---
+  // --- Data Stores ---
   const [allUsersList, setAllUsersList] = useState<any[]>([]);
   const [eventsList, setEventsList] = useState<any[]>([]);
   const [discussionsList, setDiscussionsList] = useState<any[]>([]);
@@ -77,10 +61,7 @@ export default function AdminDashboard() {
   const [notifImageUrl, setNotifImageUrl] = useState("");
   const [sendToEmail, setSendToEmail] = useState(true);
 
-  // --- PR Poster AI Studio State ---
-  const [templateImgUrl, setTemplateImgUrl] = useState("");
-  const [bgImgUrl, setBgImgUrl] = useState("");
-  const [noUploadsConfirmed, setNoUploadsConfirmed] = useState(false);
+  // --- PR Poster Studio State ---
   const [colorScheme, setColorScheme] = useState("forest");
   const [posterImages, setPosterImages] = useState<string[]>([]);
   const [posterDetails, setPosterDetails] = useState({
@@ -92,8 +73,6 @@ export default function AdminDashboard() {
     chiefGuest: "",
     customNotes: "",
   });
-  const [generatedPrompt, setGeneratedPrompt] = useState("");
-  const [copiedPrompt, setCopiedPrompt] = useState(false);
   const [generatedPosterUrl, setGeneratedPosterUrl] = useState("");
   const [generatingPoster, setGeneratingPoster] = useState(false);
 
@@ -110,7 +89,6 @@ export default function AdminDashboard() {
   const [discTitle, setDiscTitle] = useState("");
   const [discCategory, setDiscCategory] = useState<"Kenya" | "Global" | "Campus" | "Debate" | "Knowledge" | "Question">("Debate");
   const [discPrompt, setDiscPrompt] = useState("");
-  const [discMeetingInfo, setDiscMeetingInfo] = useState("Wednesday • 4:00 PM • Resource Centre");
 
   // --- Quiz State ---
   const [quizWeek, setQuizWeek] = useState("Week 5");
@@ -129,7 +107,6 @@ export default function AdminDashboard() {
   const [snapSemester, setSnapSemester] = useState("Aug - Dec 2026");
   const [snapLocation, setSnapLocation] = useState("");
   const [snapImageUrl, setSnapImageUrl] = useState("");
-  const [cameraInfo, setCameraInfo] = useState("");
 
   // Authentication check
   const handleLogin = (e: React.FormEvent) => {
@@ -138,88 +115,53 @@ export default function AdminDashboard() {
     if (passkey === validKey || passkey === "dekuwec2026") {
       setIsAuthenticated(true);
       setAuthError(false);
+      fetchAllData();
     } else {
       setAuthError(true);
     }
   };
 
-  // Real-time Firestore Listeners
-  useEffect(() => {
-    if (!isAuthenticated) return;
+  const fetchAllData = async () => {
+    try {
+      const membersRes = await fetch("/api/members");
+      const membersData = await membersRes.json();
+      if (membersData.members) setAllUsersList(membersData.members);
 
-    const unsubMembers = onSnapshot(collection(db, "members"), (snapshot) => {
-      setAllUsersList(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
-    });
+      const eventsRes = await fetch("/api/events");
+      const eventsData = await eventsRes.json();
+      if (eventsData.events) setEventsList(eventsData.events);
 
-    const qEvents = query(collection(db, "events"), orderBy("createdAt", "desc"));
-    const unsubEvents = onSnapshot(qEvents, (snapshot) => {
-      setEventsList(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
-    });
+      const discRes = await fetch("/api/discussions");
+      const discData = await discRes.json();
+      if (discData.topics) setDiscussionsList(discData.topics);
 
-    const qDisc = query(collection(db, "discussions_feed"), orderBy("createdAt", "desc"));
-    const unsubDisc = onSnapshot(qDisc, (snapshot) => {
-      setDiscussionsList(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
-    });
-
-    const qSnaps = query(collection(db, "nature_snaps"), orderBy("createdAt", "desc"));
-    const unsubSnaps = onSnapshot(qSnaps, (snapshot) => {
-      setSnapsList(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
-    });
-
-    return () => {
-      unsubMembers();
-      unsubEvents();
-      unsubDisc();
-      unsubSnaps();
-    };
-  }, [isAuthenticated]);
+      const snapsRes = await fetch("/api/snaps");
+      const snapsData = await snapsRes.json();
+      if (snapsData.snaps) setSnapsList(snapsData.snaps);
+    } catch (err) {
+      console.error("Failed to load admin dashboard data:", err);
+    }
+  };
 
   const registeredApproved = allUsersList.filter((m) => m.status === "Approved");
   const pendingApprovals = allUsersList.filter((m) => m.status === "Pending");
 
-  const handleSetStatus = async (uid: string, newStatus: "Approved" | "Pending" | "Unregistered") => {
+  const handleSetStatus = async (id: string, newStatus: "Approved" | "Pending" | "Unregistered") => {
     try {
-      await updateDoc(doc(db, "members", uid), { status: newStatus });
+      await fetch(`/api/members/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: newStatus }),
+      });
       setSuccessMsg(`Member status updated to: ${newStatus}`);
       setTimeout(() => setSuccessMsg(null), 3000);
+      fetchAllData();
     } catch (err: any) {
       setErrorMsg("Failed to update status: " + err.message);
     }
   };
 
-  // Generic Image Uploader (Used for Events, Snaps, and Notifications)
-  const handleImageUpload = async (file: File, setUrlCallback: (url: string) => void) => {
-    if (!file) return;
-    setUploadingImage(true);
-    setErrorMsg(null);
-
-    try {
-      const fileRef = ref(storage, `dekuwec_uploads/${Date.now()}_${file.name}`);
-      const uploadTask = uploadBytesResumable(fileRef, file);
-
-      uploadTask.on(
-        "state_changed",
-        null,
-        (error) => {
-          console.error("Upload error:", error);
-          setErrorMsg("Failed to upload image. Check Firebase Storage permissions.");
-          setUploadingImage(false);
-        },
-        async () => {
-          const downloadUrl = await getDownloadURL(uploadTask.snapshot.ref);
-          setUrlCallback(downloadUrl);
-          setUploadingImage(false);
-          setSuccessMsg("Image uploaded successfully!");
-          setTimeout(() => setSuccessMsg(null), 3000);
-        }
-      );
-    } catch (err: any) {
-      setErrorMsg(err.message || "Upload failed");
-      setUploadingImage(false);
-    }
-  };
-
-  // Browser Base64 Uploader for instant poster images (Fixes the hanging upload issue)
+  // Image Uploader using file reader base64 or custom upload route
   const handleMultiImageUpload = async (files: FileList) => {
     if (!files || files.length === 0) return;
     setUploadingImage(true);
@@ -243,7 +185,7 @@ export default function AdminDashboard() {
       const uploadedUrls = await Promise.all(base64Promises);
       setPosterImages((prev) => [...prev, ...uploadedUrls].slice(0, 4));
       setUploadingImage(false);
-      setSuccessMsg("Event photos successfully added to poster grid!");
+      setSuccessMsg("Photos successfully added to poster grid!");
       setTimeout(() => setSuccessMsg(null), 3000);
     } catch (err: any) {
       setErrorMsg("Failed to process photos: " + err.message);
@@ -251,7 +193,7 @@ export default function AdminDashboard() {
     }
   };
 
-  // Broadcast Push Notification (Website + Email)
+  // Broadcast Push Notification
   const handlePushWebNotification = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -259,11 +201,14 @@ export default function AdminDashboard() {
     setSuccessMsg(null);
 
     try {
-      await addDoc(collection(db, "site_notifications"), {
-        title: notifTitle,
-        message: notifMessage,
-        imageUrl: notifImageUrl || "",
-        createdAt: serverTimestamp(),
+      await fetch("/api/notifications", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: notifTitle,
+          message: notifMessage,
+          imageUrl: notifImageUrl || "",
+        }),
       });
       setSuccessMsg("Notification successfully pushed to website feed!");
       setNotifTitle(""); setNotifMessage(""); setNotifImageUrl("");
@@ -308,51 +253,6 @@ export default function AdminDashboard() {
     }
   };
 
-  // Generate PR AI Poster Prompt
-  const handleGeneratePosterPrompt = (e: React.FormEvent) => {
-    e.preventDefault();
-
-    const promptText = `
-Create an ultra-high-resolution, visually striking environmental event poster that matches the composition, typography layout, and visual rhythm of the reference template: ${
-      templateImgUrl || "Standard Modern Conservation Expedition Layout"
-    }.
-
-CRITICAL DESIGN SPECIFICATIONS (DO NOT USE ANY ORIGINAL DUMMY DETAILS FROM THE TEMPLATE):
-1. MANDATORY EMBEDDED LOGOS:
-   - DEKUWEC Official Club Logo (Top Left Corner): ${CLUB_LOGO_URL}
-   - Dedan Kimathi University of Technology (DeKUT) Crest (Top Right Corner): ${DEKUT_LOGO_URL}
-
-2. BACKGROUND ARTWORK:
-   ${
-     bgImgUrl
-       ? `- Instate this background image seamlessly across the composition: ${bgImgUrl}`
-       : "- Utilize a majestic Kenyan landscape backdrop (Aberdare Forest, Mount Kenya peaks, or rich bamboo canopies) with clean cinematic lighting."
-   }
-
-3. EVENT PARTICULARS & TYPOGRAPHY:
-   - Primary Headline: "${posterDetails.title || "DEKUWEC EXPEDITION 2026"}"
-   - Event Theme/Subtitle: "${posterDetails.theme || "Conservation • Exploration • Sustainability"}"
-   - Scheduled Date: "${posterDetails.date || "To Be Announced"}"
-   - Start Time: "${posterDetails.time || "8:00 AM EAT"}"
-   - Venue / Route: "${posterDetails.venue || "DeKUT Main Campus, Nyeri"}"
-   ${posterDetails.chiefGuest ? `- Chief Guest / Host: "${posterDetails.chiefGuest}"` : ""}
-   ${posterDetails.customNotes ? `- Crucial Notice: "${posterDetails.customNotes}"` : ""}
-
-4. MANDATORY FOOTER CONTACT & REAL SOCIAL ICONS:
-   Position clean, modern vector social icons along the bottom footer banner:
-   - [Instagram Icon] @dekut_wec
-   - [X / Twitter Icon] @Dekut_WEC
-   - [TikTok Icon] @dekut_wec
-   - [WhatsApp Icon] 0758638953
-   - Call to Action: "Join the Green Movement • Register at dekuwec-web.firebaseapp.com"
-
-STYLE: Professional graphic design, bold modern typography, high contrast, clean readable layout, suitable for official campus distribution.
-    `.trim();
-
-    setGeneratedPrompt(promptText);
-  };
-
-  // Generate Inbuilt Branded Poster Canvas with Custom Photos & Colors
   const handleGenerateInbuiltPoster = async (e: React.FormEvent) => {
     e.preventDefault();
     setGeneratingPoster(true);
@@ -387,9 +287,14 @@ STYLE: Professional graphic design, bold modern typography, high contrast, clean
 
   const handleApproveDiscussion = async (id: string) => {
     try {
-      await updateDoc(doc(db, "discussions_feed", id), { status: "Approved" });
+      await fetch(`/api/discussions/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "Approved" }),
+      });
       setSuccessMsg("Topic approved and published live!");
       setTimeout(() => setSuccessMsg(null), 3000);
+      fetchAllData();
     } catch (err: any) {
       setErrorMsg("Failed to approve topic: " + err.message);
     }
@@ -397,32 +302,36 @@ STYLE: Professional graphic design, bold modern typography, high contrast, clean
 
   const handleRejectDiscussion = async (id: string) => {
     try {
-      await deleteDoc(doc(db, "discussions_feed", id));
+      await fetch(`/api/discussions/${id}`, { method: "DELETE" });
       setSuccessMsg("Topic rejected and removed.");
       setTimeout(() => setSuccessMsg(null), 3000);
+      fetchAllData();
     } catch (err: any) {
       setErrorMsg("Failed to delete topic: " + err.message);
     }
   };
 
-  // --- STANDARD HANDLERS (Events, Snaps, Quizzes, Discussions) ---
   const handleSaveEvent = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!eventImageUrl) return setErrorMsg("Please upload an event poster.");
+    if (!eventImageUrl) return setErrorMsg("Please provide an event poster image URL.");
     setLoading(true);
     try {
-      await addDoc(collection(db, "events"), {
-        title: eventTitle.trim(),
-        statement12Words: eventStatement.trim(),
-        date: eventDate.trim(),
-        venue: eventVenue.trim(),
-        imageUrl: eventImageUrl,
-        type: eventType,
-        externalLink: eventLink.trim() || null,
-        createdAt: serverTimestamp(),
+      await fetch("/api/events", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: eventTitle.trim(),
+          statement12Words: eventStatement.trim(),
+          date: eventDate.trim(),
+          venue: eventVenue.trim(),
+          imageUrl: eventImageUrl,
+          type: eventType,
+          externalLink: eventLink.trim() || null,
+        }),
       });
       setSuccessMsg("Event published!");
       setEventTitle(""); setEventStatement(""); setEventDate(""); setEventVenue(""); setEventImageUrl(""); setEventLink("");
+      fetchAllData();
     } catch (err: any) {
       setErrorMsg(err.message);
     } finally {
@@ -431,26 +340,30 @@ STYLE: Professional graphic design, bold modern typography, high contrast, clean
   };
 
   const handleDeleteEvent = async (id: string) => {
-    if (confirm("Delete this event?")) await deleteDoc(doc(db, "events", id));
+    if (confirm("Delete this event?")) {
+      await fetch(`/api/events/${id}`, { method: "DELETE" });
+      fetchAllData();
+    }
   };
 
   const handleSaveDiscussion = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
-      await addDoc(collection(db, "discussions_feed"), {
-        title: discTitle.trim(),
-        category: discCategory,
-        prompt: discPrompt.trim(),
-        meetingInfo: discMeetingInfo.trim(),
-        status: "Approved",
-        likes: 0,
-        dislikes: 0,
-        comments: [],
-        createdAt: serverTimestamp(),
+      await fetch("/api/discussions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: discTitle.trim(),
+          category: discCategory,
+          prompt: discPrompt.trim(),
+          authorName: "Executive Admin",
+          status: "Approved",
+        }),
       });
       setSuccessMsg("Discussion posted!");
       setDiscTitle(""); setDiscPrompt("");
+      fetchAllData();
     } catch (err: any) {
       setErrorMsg(err.message);
     } finally {
@@ -458,27 +371,26 @@ STYLE: Professional graphic design, bold modern typography, high contrast, clean
     }
   };
 
-  const handleDeleteDiscussion = async (id: string) => {
-    if (confirm("Delete this topic?")) await deleteDoc(doc(db, "discussions_feed", id));
-  };
-
   const handleSaveSnap = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!snapImageUrl) return setErrorMsg("Please upload a photo.");
+    if (!snapImageUrl) return setErrorMsg("Please provide a photo URL.");
     setLoading(true);
     try {
-      await addDoc(collection(db, "nature_snaps"), {
-        title: snapTitle.trim(),
-        photographerName: photographer.trim(),
-        weekLabel: snapWeek.trim(),
-        semester: snapSemester.trim(),
-        location: snapLocation.trim(),
-        imageUrl: snapImageUrl,
-        cameraInfo: cameraInfo.trim() || null,
-        createdAt: serverTimestamp(),
+      await fetch("/api/snaps", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: snapTitle.trim(),
+          photographerName: photographer.trim(),
+          weekLabel: snapWeek.trim(),
+          semester: snapSemester.trim(),
+          location: snapLocation.trim(),
+          imageUrl: snapImageUrl,
+        }),
       });
       setSuccessMsg("Winning photo featured!");
-      setSnapTitle(""); setPhotographer(""); setSnapLocation(""); setSnapImageUrl(""); setCameraInfo("");
+      setSnapTitle(""); setPhotographer(""); setSnapLocation(""); setSnapImageUrl("");
+      fetchAllData();
     } catch (err: any) {
       setErrorMsg(err.message);
     } finally {
@@ -487,21 +399,26 @@ STYLE: Professional graphic design, bold modern typography, high contrast, clean
   };
 
   const handleDeleteSnap = async (id: string) => {
-    if (confirm("Delete this photo?")) await deleteDoc(doc(db, "nature_snaps", id));
+    if (confirm("Delete this photo?")) {
+      await fetch(`/api/snaps/${id}`, { method: "DELETE" });
+      fetchAllData();
+    }
   };
 
   const handleSaveQuiz = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
-      await addDoc(collection(db, "weekly_quizzes"), {
-        weekNumber: quizWeek.trim(),
-        question: quizQuestion.trim(),
-        options: [optA.trim(), optB.trim(), optC.trim(), optD.trim()],
-        correctIndex: Number(correctIndex),
-        explanation: explanation.trim(),
-        active: true,
-        createdAt: serverTimestamp(),
+      await fetch("/api/quiz", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          weekNumber: quizWeek.trim(),
+          question: quizQuestion.trim(),
+          options: [optA.trim(), optB.trim(), optC.trim(), optD.trim()],
+          correctIndex: Number(correctIndex),
+          explanation: explanation.trim(),
+        }),
       });
       setSuccessMsg("Weekly quiz posted!");
       setQuizQuestion(""); setOptA(""); setOptB(""); setOptC(""); setOptD(""); setExplanation("");
@@ -512,7 +429,6 @@ STYLE: Professional graphic design, bold modern typography, high contrast, clean
     }
   };
 
-  // ==================== AUTH WALL ====================
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4 text-white">
@@ -564,7 +480,6 @@ STYLE: Professional graphic design, bold modern typography, high contrast, clean
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900 flex flex-col font-sans">
-      {/* Header */}
       <header className="bg-emerald-950 text-white border-b border-emerald-900 px-6 py-4 sticky top-0 z-40">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -596,9 +511,7 @@ STYLE: Professional graphic design, bold modern typography, high contrast, clean
         </div>
       </header>
 
-      {/* Main Container */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8 w-full flex-grow">
-        {/* Navigation Tabs */}
         <div className="flex flex-wrap gap-2 bg-slate-200/90 p-1.5 rounded-2xl mb-8">
           <button
             onClick={() => setAdminTab("members")}
@@ -671,7 +584,6 @@ STYLE: Professional graphic design, bold modern typography, high contrast, clean
           </button>
         </div>
 
-        {/* Status Alerts */}
         {successMsg && (
           <div className="mb-6 p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 flex items-center gap-2 text-sm">
             <CheckCircle2 className="h-5 w-5 text-emerald-600 flex-shrink-0" />
@@ -686,10 +598,8 @@ STYLE: Professional graphic design, bold modern typography, high contrast, clean
           </div>
         )}
 
-        {/* ==================== TAB 1: MEMBERS, APPROVALS & SIGNUPS ==================== */}
         {adminTab === "members" && (
           <div className="space-y-8">
-            {/* List 1: Pending Approvals */}
             <div className="bg-white rounded-3xl border border-amber-200 shadow-sm p-6 sm:p-8">
               <div className="flex items-center justify-between pb-4 border-b border-amber-100 mb-6">
                 <div>
@@ -724,7 +634,7 @@ STYLE: Professional graphic design, bold modern typography, high contrast, clean
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {pendingApprovals.map((m) => (
-                        <tr key={m.id} className="hover:bg-amber-50/30 transition">
+                        <tr key={m._id || m.id} className="hover:bg-amber-50/30 transition">
                           <td className="py-3.5 px-4 font-bold text-slate-900">{m.displayName}</td>
                           <td className="py-3.5 px-4 font-mono text-slate-600">{m.email}</td>
                           <td className="py-3.5 px-4">{m.year || "Year 1"}</td>
@@ -734,14 +644,14 @@ STYLE: Professional graphic design, bold modern typography, high contrast, clean
                           <td className="py-3.5 px-4 text-right">
                             <div className="flex items-center justify-end gap-2">
                               <button
-                                onClick={() => handleSetStatus(m.id, "Approved")}
+                                onClick={() => handleSetStatus(m._id || m.id, "Approved")}
                                 className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1 transition"
                               >
                                 <UserCheck className="h-3.5 w-3.5" />
                                 Approve (KES 100 Paid)
                               </button>
                               <button
-                                onClick={() => handleSetStatus(m.id, "Unregistered")}
+                                onClick={() => handleSetStatus(m._id || m.id, "Unregistered")}
                                 className="px-3 py-1.5 rounded-lg bg-rose-100 hover:bg-rose-200 text-rose-800 font-bold text-xs flex items-center gap-1 transition"
                               >
                                 <UserX className="h-3.5 w-3.5" />
@@ -757,7 +667,6 @@ STYLE: Professional graphic design, bold modern typography, high contrast, clean
               )}
             </div>
 
-            {/* List 2: Active Registered Members */}
             <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 sm:p-8">
               <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-6">
                 <div>
@@ -782,7 +691,7 @@ STYLE: Professional graphic design, bold modern typography, high contrast, clean
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                   {registeredApproved.map((m) => (
                     <div
-                      key={m.id}
+                      key={m._id || m.id}
                       className="p-3.5 rounded-2xl border border-slate-100 bg-slate-50 flex items-center justify-between gap-3"
                     >
                       <div className="min-w-0">
@@ -791,7 +700,7 @@ STYLE: Professional graphic design, bold modern typography, high contrast, clean
                         <span className="text-[10px] text-emerald-700 font-bold">{m.year || "Year 1"}</span>
                       </div>
                       <button
-                        onClick={() => handleSetStatus(m.id, "Unregistered")}
+                        onClick={() => handleSetStatus(m._id || m.id, "Unregistered")}
                         title="Revoke Verification"
                         className="text-xs text-rose-500 hover:text-rose-700 p-1 font-semibold"
                       >
@@ -802,62 +711,9 @@ STYLE: Professional graphic design, bold modern typography, high contrast, clean
                 </div>
               )}
             </div>
-
-            {/* List 3: All Signups on Website */}
-            <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 sm:p-8">
-              <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-6">
-                <div>
-                  <h3 className="text-lg font-black text-slate-900 flex items-center gap-2">
-                    <Users className="h-5 w-5 text-slate-700" />
-                    Complete Signups & Notification Mailing List ({allUsersList.length})
-                  </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Every student who has created an account on the portal. All emails are saved for automated push alerts.
-                  </p>
-                </div>
-              </div>
-
-              <div className="max-h-72 overflow-y-auto pr-1">
-                <table className="w-full text-left text-xs text-slate-700">
-                  <thead className="bg-slate-50 text-[10px] uppercase text-slate-400 border-b border-slate-100">
-                    <tr>
-                      <th className="py-2.5 px-3">User</th>
-                      <th className="py-2.5 px-3">Email Address</th>
-                      <th className="py-2.5 px-3">Member Status</th>
-                      <th className="py-2.5 px-3">Signup Date</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {allUsersList.map((u) => (
-                      <tr key={u.id}>
-                        <td className="py-2.5 px-3 font-semibold text-slate-900">{u.displayName || "Anonymous User"}</td>
-                        <td className="py-2.5 px-3 font-mono text-slate-600">{u.email}</td>
-                        <td className="py-2.5 px-3">
-                          <span
-                            className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                              u.status === "Approved"
-                                ? "bg-emerald-100 text-emerald-800"
-                                : u.status === "Pending"
-                                ? "bg-amber-100 text-amber-800"
-                                : "bg-slate-200 text-slate-700"
-                            }`}
-                          >
-                            {u.status || "Unregistered"}
-                          </span>
-                        </td>
-                        <td className="py-2.5 px-3 text-slate-400">
-                          {u.createdAt ? new Date(u.createdAt).toLocaleDateString() : "Registered"}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
           </div>
         )}
 
-        {/* ==================== TAB 2: PUSH NOTIFICATIONS ==================== */}
         {adminTab === "notifications" && (
           <div className="max-w-3xl mx-auto bg-white rounded-3xl border border-slate-200 p-6 sm:p-10 shadow-xs">
             <div className="flex items-center gap-3 mb-6 pb-4 border-b border-slate-100">
@@ -867,7 +723,7 @@ STYLE: Professional graphic design, bold modern typography, high contrast, clean
               <div>
                 <h3 className="text-xl font-black text-slate-900">Broadcast Member Notification</h3>
                 <p className="text-xs text-slate-500">
-                  Pushes a live notification banner to the website and dispatches an announcement email with images to all {allUsersList.length} registered accounts.
+                  Pushes a live notification banner to the website and dispatches an announcement email to all {allUsersList.length} registered accounts.
                 </p>
               </div>
             </div>
@@ -903,30 +759,14 @@ STYLE: Professional graphic design, bold modern typography, high contrast, clean
 
               <div>
                 <label className="block text-xs font-bold uppercase text-slate-700 mb-1">
-                  Attach Picture or Poster URL (Included in Email Dispatch)
+                  Attach Picture or Poster URL
                 </label>
-                <div className="flex items-center gap-3">
-                  <label className="cursor-pointer flex items-center gap-2 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold border border-slate-300 transition">
-                    <UploadCloud className="h-4 w-4 text-emerald-600" />
-                    <span>{uploadingImage ? "Uploading..." : "Upload Poster"}</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) handleImageUpload(file, setNotifImageUrl);
-                      }}
-                    />
-                  </label>
-                  <span className="text-xs text-slate-400">or paste direct image link</span>
-                </div>
                 <input
                   type="url"
                   placeholder="https://..."
                   value={notifImageUrl}
                   onChange={(e) => setNotifImageUrl(e.target.value)}
-                  className="w-full p-2.5 rounded-xl border border-slate-200 text-sm mt-2"
+                  className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
                 />
                 {notifImageUrl && (
                   <div className="mt-2 h-32 w-full rounded-xl overflow-hidden border border-slate-200 bg-slate-50">
@@ -935,33 +775,20 @@ STYLE: Professional graphic design, bold modern typography, high contrast, clean
                 )}
               </div>
 
-              <div className="pt-2 flex items-center gap-3">
-                <input
-                  type="checkbox"
-                  id="sendEmailBox"
-                  checked={sendToEmail}
-                  onChange={(e) => setSendToEmail(e.target.checked)}
-                  className="h-4 w-4 text-emerald-600 rounded border-slate-300"
-                />
-                <label htmlFor="sendEmailBox" className="text-xs font-bold text-slate-700 cursor-pointer">
-                  Send directly to all {allUsersList.length} signup emails via Brevo
-                </label>
-              </div>
-
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4">
                 <button
                   type="submit"
-                  disabled={loading || uploadingImage}
-                  className="py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm transition flex items-center justify-center gap-2 disabled:opacity-50 shadow-md"
+                  disabled={loading}
+                  className="py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm transition flex items-center justify-center gap-2 shadow-md"
                 >
                   {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bell className="h-4 w-4" />}
                   <span>Push to Website Feed</span>
                 </button>
                 <button
                   type="button"
-                  disabled={loading || uploadingImage || !notifTitle || !notifMessage}
+                  disabled={loading || !notifTitle || !notifMessage}
                   onClick={handleSendEmailBroadcast}
-                  className="py-3.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-sm transition flex items-center justify-center gap-2 disabled:opacity-50 shadow-md"
+                  className="py-3.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-sm transition flex items-center justify-center gap-2 shadow-md"
                 >
                   {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                   <span>Send Email to All ({allUsersList.length})</span>
@@ -971,7 +798,6 @@ STYLE: Professional graphic design, bold modern typography, high contrast, clean
           </div>
         )}
 
-        {/* ==================== TAB 3: PR AI POSTER STUDIO (WITH BROWSER BASE64 MULTI-UPLOAD) ==================== */}
         {adminTab === "ai-poster" && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
             <div className="lg:col-span-6 bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-xs space-y-6">
@@ -981,7 +807,7 @@ STYLE: Professional graphic design, bold modern typography, high contrast, clean
                 </span>
                 <h3 className="text-xl font-black text-slate-900 mt-1">Generate Branded Event Poster</h3>
                 <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
-                  Design official posters instantly with in-built university and club crests, customizable color palettes, and 2 to 4 uploaded event photos.
+                  Design official posters instantly with in-built university and club crests, customizable color palettes, and uploaded event photos.
                 </p>
               </div>
 
@@ -1048,7 +874,6 @@ STYLE: Professional graphic design, bold modern typography, high contrast, clean
                   </select>
                 </div>
 
-                {/* MULTI IMAGE UPLOAD (2 TO 4 PICTURES) WITH FIXED HTMLFOR */}
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
                     Upload Event Pictures (2 to 4 Images for Poster Grid)
@@ -1099,7 +924,6 @@ STYLE: Professional graphic design, bold modern typography, high contrast, clean
               </form>
             </div>
 
-            {/* Canvas Preview (6 cols) */}
             <div className="lg:col-span-6 bg-white rounded-3xl border border-slate-200 p-6 shadow-xs space-y-4 text-center">
               <h4 className="font-bold text-slate-900 text-sm pb-3 border-b">Generated Poster Preview Canvas</h4>
               {generatedPosterUrl ? (
@@ -1127,7 +951,6 @@ STYLE: Professional graphic design, bold modern typography, high contrast, clean
           </div>
         )}
 
-        {/* ==================== TAB 4: MANAGE EVENTS ==================== */}
         {adminTab === "events" && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
             <div className="lg:col-span-7 bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-xs">
@@ -1179,28 +1002,14 @@ STYLE: Professional graphic design, bold modern typography, high contrast, clean
                   />
                 </div>
 
-                <div>
-                  <label className="cursor-pointer flex items-center gap-2 px-4 py-2.5 bg-slate-100 rounded-xl text-xs font-bold border border-slate-300 w-fit">
-                    <UploadCloud className="h-4 w-4 text-emerald-600" />
-                    <span>Upload Poster Image</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) handleImageUpload(file, setEventImageUrl);
-                      }}
-                    />
-                  </label>
-                  <input
-                    type="url"
-                    placeholder="or paste image URL"
-                    value={eventImageUrl}
-                    onChange={(e) => setEventImageUrl(e.target.value)}
-                    className="w-full p-2.5 rounded-xl border border-slate-200 text-sm mt-2"
-                  />
-                </div>
+                <input
+                  type="url"
+                  required
+                  placeholder="Poster Image URL"
+                  value={eventImageUrl}
+                  onChange={(e) => setEventImageUrl(e.target.value)}
+                  className="w-full p-2.5 rounded-xl border border-slate-200 text-sm"
+                />
 
                 <button
                   type="submit"
@@ -1216,7 +1025,7 @@ STYLE: Professional graphic design, bold modern typography, high contrast, clean
               <h4 className="font-bold text-slate-900 mb-4 pb-2 border-b">Published Events ({eventsList.length})</h4>
               <div className="space-y-3 max-h-[500px] overflow-y-auto">
                 {eventsList.map((evt) => (
-                  <div key={evt.id} className="p-3 rounded-xl border bg-slate-50 flex items-center justify-between">
+                  <div key={evt._id || evt.id} className="p-3 rounded-xl border bg-slate-50 flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <img src={evt.imageUrl} className="h-12 w-12 rounded-lg object-cover" />
                       <div>
@@ -1224,7 +1033,7 @@ STYLE: Professional graphic design, bold modern typography, high contrast, clean
                         <p className="text-[10px] text-slate-500">{evt.date}</p>
                       </div>
                     </div>
-                    <button onClick={() => handleDeleteEvent(evt.id)} className="text-rose-500 p-1">
+                    <button onClick={() => handleDeleteEvent(evt._id || evt.id)} className="text-rose-500 p-1">
                       <Trash2 className="h-4 w-4" />
                     </button>
                   </div>
@@ -1234,7 +1043,6 @@ STYLE: Professional graphic design, bold modern typography, high contrast, clean
           </div>
         )}
 
-        {/* ==================== TAB 5: DISCUSSIONS & MODERATION ==================== */}
         {adminTab === "discussions" && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
             <div className="lg:col-span-6 bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-xs">
@@ -1288,17 +1096,17 @@ STYLE: Professional graphic design, bold modern typography, high contrast, clean
                   <p className="text-xs text-slate-400 py-6 text-center italic">No pending submissions.</p>
                 ) : (
                   discussionsList.filter((d) => d.status === "Pending").map((item) => (
-                    <div key={item.id} className="p-4 rounded-2xl border border-amber-200 bg-amber-50/40 space-y-2">
+                    <div key={item._id || item.id} className="p-4 rounded-2xl border border-amber-200 bg-amber-50/40 space-y-2">
                       <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-200 text-amber-900">
                         {item.category} • {item.authorName || "Member"}
                       </span>
                       <h5 className="font-bold text-slate-900 text-sm">{item.title}</h5>
                       <p className="text-xs text-slate-700">{item.prompt}</p>
                       <div className="flex items-center justify-end gap-2 pt-2">
-                        <button onClick={() => handleApproveDiscussion(item.id)} className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-bold flex items-center gap-1">
+                        <button onClick={() => handleApproveDiscussion(item._id || item.id)} className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-bold flex items-center gap-1">
                           <CheckSquare className="h-3.5 w-3.5" /> Approve
                         </button>
-                        <button onClick={() => handleRejectDiscussion(item.id)} className="px-3 py-1.5 rounded-lg bg-rose-100 text-rose-800 text-xs font-bold flex items-center gap-1">
+                        <button onClick={() => handleRejectDiscussion(item._id || item.id)} className="px-3 py-1.5 rounded-lg bg-rose-100 text-rose-800 text-xs font-bold flex items-center gap-1">
                           <XCircle className="h-3.5 w-3.5" /> Reject
                         </button>
                       </div>
@@ -1310,7 +1118,6 @@ STYLE: Professional graphic design, bold modern typography, high contrast, clean
           </div>
         )}
 
-        {/* ==================== TAB 6: NATURE SNAPS ==================== */}
         {adminTab === "snaps" && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
             <div className="lg:col-span-7 bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-xs">
@@ -1325,17 +1132,7 @@ STYLE: Professional graphic design, bold modern typography, high contrast, clean
                   <input type="text" required placeholder="Semester" value={snapSemester} onChange={(e) => setSnapSemester(e.target.value)} className="p-2.5 rounded-xl border border-slate-200 text-sm" />
                   <input type="text" required placeholder="Location" value={snapLocation} onChange={(e) => setSnapLocation(e.target.value)} className="p-2.5 rounded-xl border border-slate-200 text-sm" />
                 </div>
-                <div>
-                  <label className="cursor-pointer flex items-center gap-2 px-4 py-2.5 bg-slate-100 rounded-xl text-xs font-bold border border-slate-300 w-fit">
-                    <UploadCloud className="h-4 w-4 text-emerald-600" />
-                    <span>Upload Image</span>
-                    <input type="file" accept="image/*" className="hidden" onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) handleImageUpload(file, setSnapImageUrl);
-                    }} />
-                  </label>
-                  <input type="url" placeholder="or paste URL" value={snapImageUrl} onChange={(e) => setSnapImageUrl(e.target.value)} className="w-full p-2.5 rounded-xl border border-slate-200 text-sm mt-2" />
-                </div>
+                <input type="url" required placeholder="Photo Image URL" value={snapImageUrl} onChange={(e) => setSnapImageUrl(e.target.value)} className="w-full p-2.5 rounded-xl border border-slate-200 text-sm" />
                 <button type="submit" disabled={loading} className="w-full py-3 rounded-xl bg-emerald-700 text-white font-bold text-sm">Feature Photo</button>
               </form>
             </div>
@@ -1344,7 +1141,7 @@ STYLE: Professional graphic design, bold modern typography, high contrast, clean
               <h4 className="font-bold text-slate-900 mb-4 pb-2 border-b">Featured Snaps ({snapsList.length})</h4>
               <div className="space-y-3 max-h-[500px] overflow-y-auto">
                 {snapsList.map((snap) => (
-                  <div key={snap.id} className="p-3 rounded-xl border bg-slate-50 flex items-center justify-between">
+                  <div key={snap._id || snap.id} className="p-3 rounded-xl border bg-slate-50 flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <img src={snap.imageUrl} className="h-12 w-12 rounded-lg object-cover" />
                       <div>
@@ -1352,7 +1149,7 @@ STYLE: Professional graphic design, bold modern typography, high contrast, clean
                         <p className="text-[10px] text-slate-500">By {snap.photographerName}</p>
                       </div>
                     </div>
-                    <button onClick={() => handleDeleteSnap(snap.id)} className="text-rose-500 p-1"><Trash2 className="h-4 w-4" /></button>
+                    <button onClick={() => handleDeleteSnap(snap._id || snap.id)} className="text-rose-500 p-1"><Trash2 className="h-4 w-4" /></button>
                   </div>
                 ))}
               </div>
@@ -1360,7 +1157,6 @@ STYLE: Professional graphic design, bold modern typography, high contrast, clean
           </div>
         )}
 
-        {/* ==================== TAB 7: WEEKLY QUIZ ==================== */}
         {adminTab === "quiz" && (
           <div className="max-w-3xl mx-auto bg-white rounded-3xl border border-slate-200 p-6 sm:p-10 shadow-xs">
             <h3 className="text-xl font-black text-slate-900 mb-6">Update Active Weekly Quiz</h3>
@@ -1371,7 +1167,7 @@ STYLE: Professional graphic design, bold modern typography, high contrast, clean
                 <input type="text" required placeholder="Option A" value={optA} onChange={(e) => setOptA(e.target.value)} className="p-2.5 rounded-xl border border-slate-200 text-sm" />
                 <input type="text" required placeholder="Option B" value={optB} onChange={(e) => setOptB(e.target.value)} className="p-2.5 rounded-xl border border-slate-200 text-sm" />
                 <input type="text" required placeholder="Option C" value={optC} onChange={(e) => setOptC(e.target.value)} className="p-2.5 rounded-xl border border-slate-200 text-sm" />
-                <input type="text" required placeholder="Option D" value={optD} onChange={(e) => setOptD(e.target.value)} className="p-2.5 rounded-xl border border-slate-200 z-10 text-sm" />
+                <input type="text" required placeholder="Option D" value={optD} onChange={(e) => setOptD(e.target.value)} className="p-2.5 rounded-xl border border-slate-200 text-sm" />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <select value={correctIndex} onChange={(e) => setCorrectIndex(Number(e.target.value))} className="p-2.5 rounded-xl border border-slate-200 text-sm bg-white">

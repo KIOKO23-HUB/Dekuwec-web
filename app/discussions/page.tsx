@@ -2,12 +2,12 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { auth, db } from "@/lib/mongodb";
-import { collection, addDoc, onSnapshot, query, orderBy, doc, updateDoc, arrayUnion } from "firebase/firestore";
+import { useUser } from "@clerk/nextjs";
 import Navbar from "@/components/Navbar";
-import { Globe, Plus, ThumbsUp, ThumbsDown, MessageSquare, Send, Clock, CheckCircle2 } from "lucide-react";
+import { Plus, ThumbsUp, ThumbsDown, MessageSquare, Send, CheckCircle2 } from "lucide-react";
 
 export default function DiscussionsPage() {
+  const { user } = useUser();
   const [topics, setTopics] = useState<any[]>([]);
   const [title, setTitle] = useState("");
   const [category, setCategory] = useState("Debate");
@@ -15,70 +15,80 @@ export default function DiscussionsPage() {
   const [commentInputs, setCommentInputs] = useState<{ [key: string]: string }>({});
   const [successMsg, setSuccessMsg] = useState("");
 
+  const fetchTopics = async () => {
+    try {
+      const res = await fetch("/api/discussions");
+      const data = await res.json();
+      if (data.topics) setTopics(data.topics);
+    } catch (err) {
+      console.error("Failed to fetch discussions:", err);
+    }
+  };
+
   useEffect(() => {
-    const q = query(collection(db, "discussions_feed"), orderBy("createdAt", "desc"));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setTopics(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
-    });
-    return () => unsubscribe();
+    fetchTopics();
   }, []);
 
   const handlePostTopic = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!auth.currentUser) {
+    if (!user) {
       alert("Please log in to submit a discussion.");
       return;
     }
 
     try {
-      await addDoc(collection(db, "discussions_feed"), {
-        title: title.trim(),
-        category,
-        prompt: prompt.trim(),
-        authorName: auth.currentUser.displayName || "Club Member",
-        authorId: auth.currentUser.uid,
-        meetingInfo: "Community Submission",
-        status: "Pending", // Needs admin approval
-        likes: 0,
-        dislikes: 0,
-        comments: [],
-        createdAt: new Date().toISOString(),
+      const res = await fetch("/api/discussions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: title.trim(),
+          category,
+          prompt: prompt.trim(),
+          authorName: user.fullName || user.username || "Club Member",
+          authorId: user.id,
+        }),
       });
+
+      if (!res.ok) throw new Error("Failed to submit topic");
+
       setTitle("");
       setPrompt("");
-      setSuccessMsg("Topic submitted successfully! It will appear publicly once approved by an admin.");
+      setSuccessMsg("Topic submitted successfully! It will appear publicly once approved.");
       setTimeout(() => setSuccessMsg(""), 5000);
+      fetchTopics();
     } catch (err: any) {
       alert("Failed to submit topic: " + err.message);
     }
   };
 
-  const handleReaction = async (id: string, currentLikes: number, type: "likes" | "dislikes") => {
+  const handleReaction = async (id: string, type: "likes" | "dislikes") => {
     try {
-      const topicRef = doc(db, "discussions_feed", id);
-      await updateDoc(topicRef, {
-        [type]: (currentLikes || 0) + 1,
+      await fetch(`/api/discussions/${id}/react`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type }),
       });
-    } catch (err: any) {
+      fetchTopics();
+    } catch (err) {
       console.error(err);
     }
   };
 
   const handleAddComment = async (id: string) => {
     const text = commentInputs[id];
-    if (!text || !text.trim() || !auth.currentUser) return;
+    if (!text || !text.trim() || !user) return;
 
     try {
-      const topicRef = doc(db, "discussions_feed", id);
-      const newComment = {
-        userName: auth.currentUser.displayName || "Member",
-        text: text.trim(),
-        timestamp: new Date().toISOString(),
-      };
-      await updateDoc(topicRef, {
-        comments: arrayUnion(newComment),
+      await fetch(`/api/discussions/${id}/comment`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userName: user.fullName || user.username || "Member",
+          text: text.trim(),
+        }),
       });
       setCommentInputs({ ...commentInputs, [id]: "" });
+      fetchTopics();
     } catch (err: any) {
       alert("Failed to add comment: " + err.message);
     }
@@ -98,7 +108,7 @@ export default function DiscussionsPage() {
 
         {successMsg && (
           <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs flex items-center gap-2">
-            <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-405" />
+            <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
             <span>{successMsg}</span>
           </div>
         )}
@@ -164,7 +174,7 @@ export default function DiscussionsPage() {
             topics
               .filter((t) => t.status === "Approved" || !t.status)
               .map((item) => (
-                <div key={item.id} className="bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-4 shadow-lg">
+                <div key={item._id || item.id} className="bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-4 shadow-lg">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <span className="text-[10px] font-black uppercase px-2.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
@@ -185,14 +195,14 @@ export default function DiscussionsPage() {
                   {/* Likes / Dislikes */}
                   <div className="flex items-center gap-4 pt-2 border-t border-slate-800/80">
                     <button
-                      onClick={() => handleReaction(item.id, item.likes || 0, "likes")}
+                      onClick={() => handleReaction(item._id || item.id, "likes")}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 text-xs text-emerald-400 transition"
                     >
                       <ThumbsUp className="h-3.5 w-3.5" />
                       <span>{item.likes || 0}</span>
                     </button>
                     <button
-                      onClick={() => handleReaction(item.id, item.dislikes || 0, "dislikes")}
+                      onClick={() => handleReaction(item._id || item.id, "dislikes")}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 text-xs text-rose-400 transition"
                     >
                       <ThumbsDown className="h-3.5 w-3.5" />
@@ -219,12 +229,12 @@ export default function DiscussionsPage() {
                       <input
                         type="text"
                         placeholder="Write a live comment..."
-                        value={commentInputs[item.id] || ""}
-                        onChange={(e) => setCommentInputs({ ...commentInputs, [item.id]: e.target.value })}
+                        value={commentInputs[item._id || item.id] || ""}
+                        onChange={(e) => setCommentInputs({ ...commentInputs, [item._id || item.id]: e.target.value })}
                         className="flex-1 p-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white outline-none"
                       />
                       <button
-                        onClick={() => handleAddComment(item.id)}
+                        onClick={() => handleAddComment(item._id || item.id)}
                         className="px-4 py-2 rounded-xl bg-emerald-500 text-slate-950 font-bold text-xs hover:bg-emerald-400 transition"
                       >
                         <Send className="h-3.5 w-3.5" />

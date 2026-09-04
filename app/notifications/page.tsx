@@ -2,8 +2,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { db } from "@/lib/mongodb";
-import { collection, onSnapshot, query, orderBy } from "firebase/firestore";
 import Navbar from "@/components/Navbar";
 import { Bell, Calendar } from "lucide-react";
 
@@ -11,11 +9,19 @@ export default function NotificationsPage() {
   const [notifications, setNotifications] = useState<any[]>([]);
 
   useEffect(() => {
-    const q = query(collection(db, "site_notifications"), orderBy("createdAt", "desc"));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setNotifications(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
-    });
-    return () => unsubscribe();
+    const fetchNotifications = async () => {
+      try {
+        const res = await fetch("/api/notifications");
+        const data = await res.json();
+        if (data.notifications) {
+          setNotifications(data.notifications);
+        }
+      } catch (err) {
+        console.error("Failed to load notifications:", err);
+      }
+    };
+
+    fetchNotifications();
   }, []);
 
   return (
@@ -36,13 +42,13 @@ export default function NotificationsPage() {
         ) : (
           <div className="space-y-4">
             {notifications.map((n) => (
-              <div key={n.id} className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-lg space-y-3">
+              <div key={n._id || n.id} className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-lg space-y-3">
                 <div className="flex items-center justify-between">
                   <h3 className="font-black text-white text-base flex items-center gap-2">
                     <Bell className="h-4 w-4 text-emerald-400" /> {n.title}
                   </h3>
                   <span className="text-[11px] text-slate-500 flex items-center gap-1">
-                    <Calendar className="h-3 w-3" /> {n.createdAt ? new Date(n.createdAt?.toDate?.() || n.createdAt).toLocaleString() : "Recent"}
+                    <Calendar className="h-3 w-3" /> {n.createdAt ? new Date(n.createdAt).toLocaleString() : "Recent"}
                   </span>
                 </div>
                 <p className="text-xs text-slate-300 leading-relaxed">{n.message}</p>

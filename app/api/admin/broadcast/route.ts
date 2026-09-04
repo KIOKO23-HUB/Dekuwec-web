@@ -1,26 +1,37 @@
 // app/api/admin/broadcast/route.ts
 import { NextResponse } from "next/server";
-import { db } from "@/lib/mongodb";
-import { addDoc, collection, serverTimestamp } from "firebase/firestore";
+import { connectDB } from "@/lib/mongodb";
+import mongoose from "mongoose";
+
+// Define a schema/model for site notifications if not already created
+const NotificationSchema = new mongoose.Schema({
+  title: String,
+  message: String,
+  imageUrl: String,
+  createdAt: { type: Date, default: Date.now },
+  active: { type: Boolean, default: true },
+});
+
+const SiteNotification = mongoose.models.SiteNotification || mongoose.model("SiteNotification", NotificationSchema);
 
 export async function POST(req: Request) {
   try {
+    await connectDB();
     const { title, message, imageUrl, targetEmails, sendEmail } = await req.json();
 
     if (!title || !message) {
       return NextResponse.json({ error: "Title and message are required." }, { status: 400 });
     }
 
-    // 1. Post In-Website Notification
-    await addDoc(collection(db, "site_notifications"), {
+    // 1. Post In-Website Notification to MongoDB
+    await SiteNotification.create({
       title: title.trim(),
       message: message.trim(),
       imageUrl: imageUrl || null,
-      createdAt: serverTimestamp(),
       active: true,
     });
 
-    // 2. Optional Broadcast Email to Signups / Members
+    // 2. Optional Broadcast Email to Signups / Members via Brevo
     if (sendEmail && Array.isArray(targetEmails) && targetEmails.length > 0) {
       const brevoApiKey = process.env.BREVO_API_KEY;
       if (brevoApiKey) {
