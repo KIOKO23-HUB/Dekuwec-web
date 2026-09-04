@@ -2,8 +2,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { auth, db } from "@/lib/firebase";
-import { collection, query, orderBy, onSnapshot, limit, doc, updateDoc, arrayUnion } from "firebase/firestore";
+import { useUser } from "@clerk/nextjs";
 import { 
   Radio, 
   HelpCircle, 
@@ -46,7 +45,6 @@ interface QuizItem {
   explanation: string;
 }
 
-// Default fallback quiz if Firestore hasn't been populated yet
 const DEFAULT_QUIZ: QuizItem = {
   id: "default-quiz",
   weekNumber: "Week 4",
@@ -62,14 +60,13 @@ const DEFAULT_QUIZ: QuizItem = {
 };
 
 export default function EcoPulseSection() {
+  const { user, isSignedIn } = useUser();
   const [feedItems, setFeedItems] = useState<FeedItem[]>([]);
   const [currentQuiz, setCurrentQuiz] = useState<QuizItem>(DEFAULT_QUIZ);
   
-  // Weekly Quiz State
   const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null);
   const [isSubmitted, setIsSubmitted] = useState(false);
 
-  // New Topic Submission Form State
   const [showSubmitForm, setShowSubmitForm] = useState(false);
   const [newCategory, setNewCategory] = useState("Debate");
   const [newTitle, setNewTitle] = useState("");
@@ -77,50 +74,36 @@ export default function EcoPulseSection() {
   const [submittingTopic, setSubmittingTopic] = useState(false);
   const [toastMsg, setToastMsg] = useState("");
 
-  // Comment input states mapped by item id
   const [commentInputs, setCommentInputs] = useState<{ [key: string]: string }>({});
 
   useEffect(() => {
-    // 1. Stream all active discussions and news updates in real-time
-    const qFeed = query(collection(db, "discussions_feed"), orderBy("createdAt", "desc"));
-    const unsubFeed = onSnapshot(qFeed, (snapshot) => {
-      if (!snapshot.empty) {
-        const liveItems = snapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-        })) as FeedItem[];
-        setFeedItems(liveItems);
-      } else {
-        setFeedItems([
-          {
-            id: "default-debate",
-            category: "Debate",
-            title: "Carbon Credit Markets: Genuine Climate Solution or Corporate Greenwashing?",
-            prompt: "As Kenya positions itself as an African carbon trading hub, do forest carbon projects equitably benefit surrounding indigenous communities and grassroots conservationists, or do they primarily serve foreign industrial emitters?",
-            meetingInfo: "Wednesday • 4:00 PM • Resource Centre Hall",
-          },
-        ]);
+    // Fetch discussions and quizzes from API endpoints
+    const fetchData = async () => {
+      try {
+        const res = await fetch("/api/ecopulse");
+        const data = await res.json();
+        if (data.feedItems && data.feedItems.length > 0) {
+          setFeedItems(data.feedItems);
+        } else {
+          setFeedItems([
+            {
+              id: "default-debate",
+              category: "Debate",
+              title: "Carbon Credit Markets: Genuine Climate Solution or Corporate Greenwashing?",
+              prompt: "As Kenya positions itself as an African carbon trading hub, do forest carbon projects equitably benefit surrounding indigenous communities and grassroots conservationists, or do they primarily serve foreign industrial emitters?",
+              meetingInfo: "Wednesday • 4:00 PM • Resource Centre Hall",
+            },
+          ]);
+        }
+        if (data.latestQuiz) {
+          setCurrentQuiz(data.latestQuiz);
+        }
+      } catch (err) {
+        console.error("Failed to load EcoPulse data:", err);
       }
-    });
-
-    // 2. Stream latest weekly quiz
-    const qQuiz = query(collection(db, "weekly_quizzes"), orderBy("createdAt", "desc"), limit(1));
-    const unsubQuiz = onSnapshot(qQuiz, (snapshot) => {
-      if (!snapshot.empty) {
-        const quizDoc = snapshot.docs[0];
-        setCurrentQuiz({
-          id: quizDoc.id,
-          ...quizDoc.data(),
-        } as QuizItem);
-        setIsSubmitted(false);
-        setSelectedAnswer(null);
-      }
-    });
-
-    return () => {
-      unsubFeed();
-      unsubQuiz();
     };
+
+    fetchData();
   }, []);
 
   const handleQuizSubmit = () => {
@@ -131,34 +114,35 @@ export default function EcoPulseSection() {
 
   const handlePostTopic = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!auth.currentUser) {
+    if (!isSignedIn || !user) {
       alert("Please log in to submit a discussion or question.");
       return;
     }
 
     setSubmittingTopic(true);
     try {
-      await updateDoc(doc(collection(db, "discussions_feed")), {}); // placeholder or direct addDoc
-      // Wait, let's use addDoc correctly
-      const { addDoc } = await import("firebase/firestore");
-      await addDoc(collection(db, "discussions_feed"), {
-        title: newTitle.trim(),
-        category: newCategory,
-        prompt: newPrompt.trim(),
-        authorName: auth.currentUser.displayName || "Club Member",
-        authorId: auth.currentUser.uid,
-        meetingInfo: "Community Submission",
-        status: "Pending", // Needs admin approval to show publicly in stream
-        likes: 0,
-        dislikes: 0,
-        comments: [],
-        createdAt: new Date().toISOString(),
+      const authorDisplayName = user.fullName || user.firstName || "Club Member";
+      const res = await fetch("/api/ecopulse", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "postTopic",
+          title: newTitle.trim(),
+          category: newCategory,
+          prompt: newPrompt.trim(),
+          authorName: authorDisplayName,
+          authorId: user.id,
+        }),
       });
 
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to submit topic");
+
+      setFeedItems((prev) => [data.newItem, ...prev]);
       setNewTitle("");
       setNewPrompt("");
       setShowSubmitForm(false);
-      setToastMsg("Topic submitted successfully! It will appear publicly once approved by an admin.");
+      setToastMsg("Topic submitted successfully! It is now live in the feed.");
       setTimeout(() => setToastMsg(""), 5000);
     } catch (err: any) {
       alert("Failed to submit topic: " + err.message);
@@ -169,10 +153,17 @@ export default function EcoPulseSection() {
 
   const handleReaction = async (id: string, currentCount: number = 0, type: "likes" | "dislikes") => {
     try {
-      const topicRef = doc(db, "discussions_feed", id);
-      await updateDoc(topicRef, {
-        [type]: currentCount + 1,
+      const res = await fetch("/api/ecopulse", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "react", id, type, currentCount }),
       });
+      const data = await res.json();
+      if (res.ok) {
+        setFeedItems((prev) =>
+          prev.map((item) => (item.id === id ? { ...item, [type]: data.newValue } : item))
+        );
+      }
     } catch (err) {
       console.error(err);
     }
@@ -180,25 +171,39 @@ export default function EcoPulseSection() {
 
   const handleAddComment = async (id: string) => {
     const text = commentInputs[id];
-    if (!text || !text.trim() || !auth.currentUser) return;
+    if (!text || !text.trim() || !user) {
+      if (!user) alert("Please log in to leave a comment.");
+      return;
+    }
 
     try {
-      const topicRef = doc(db, "discussions_feed", id);
-      const newComment = {
-        userName: auth.currentUser.displayName || "Member",
-        text: text.trim(),
-        timestamp: new Date().toISOString(),
-      };
-      await updateDoc(topicRef, {
-        comments: arrayUnion(newComment),
+      const commenterName = user.fullName || user.firstName || "Member";
+      const res = await fetch("/api/ecopulse", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "addComment",
+          id,
+          comment: {
+            userName: commenterName,
+            userId: user.id,
+            text: text.trim(),
+            timestamp: new Date().toISOString(),
+          },
+        }),
       });
-      setCommentInputs({ ...commentInputs, [id]: "" });
+      const data = await res.json();
+      if (res.ok) {
+        setFeedItems((prev) =>
+          prev.map((item) => (item.id === id ? { ...item, comments: data.comments } : item))
+        );
+        setCommentInputs({ ...commentInputs, [id]: "" });
+      }
     } catch (err: any) {
       alert("Failed to add comment: " + err.message);
     }
   };
 
-  // Filter approved or default items for the public view
   const approvedItems = feedItems.filter((i) => i.status === "Approved" || !i.status);
   const primaryDebate = approvedItems.find((i) => i.category === "Debate") || approvedItems[0];
   const newsAndDispatches = approvedItems.filter((i) => i.id !== primaryDebate?.id);
@@ -207,7 +212,6 @@ export default function EcoPulseSection() {
     <section id="ecopulse-section" className="py-14 bg-slate-50 min-h-screen">
       <div className="max-w-7xl mx-auto px-4 sm:px-6">
         
-        {/* Header & Submit Button */}
         <div className="flex flex-col md:flex-row md:items-center justify-between mb-12 gap-4">
           <div>
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider text-emerald-800 bg-emerald-100 border border-emerald-200">
@@ -241,9 +245,8 @@ export default function EcoPulseSection() {
           </div>
         )}
 
-        {/* Member Submission Form Modal / Card */}
         {showSubmitForm && (
-          <div className="mb-12 bg-white rounded-3xl border border-emerald-200 p-6 sm:p-8 shadow-xl animate-in fade-in">
+          <div className="mb-12 bg-white rounded-3xl border border-emerald-200 p-6 sm:p-8 shadow-xl">
             <h3 className="text-base font-black text-slate-900 mb-4 flex items-center gap-2">
               <Sparkles className="h-4 w-4 text-emerald-600" /> Share Knowledge, History, News or Pose a Question
             </h3>
@@ -291,16 +294,13 @@ export default function EcoPulseSection() {
                 disabled={submittingTopic}
                 className="py-2.5 px-6 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition shadow-sm disabled:opacity-50"
               >
-                {submittingTopic ? "Submitting..." : "Submit for Admin Approval"}
+                {submittingTopic ? "Submitting..." : "Submit Topic"}
               </button>
             </form>
           </div>
         )}
 
-        {/* Top Grid: Primary Meeting Debate & Weekly Quiz */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 mb-16 items-start">
-          
-          {/* 1. Weekly Meeting Discussion Topic (7 cols) */}
           <div className="lg:col-span-7 bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-xs flex flex-col justify-between min-h-[460px]">
             {primaryDebate ? (
               <>
@@ -349,12 +349,11 @@ export default function EcoPulseSection() {
               </>
             ) : (
               <div className="py-16 text-center text-slate-400 text-sm">
-                No active debate topic found. Add one from the Admin portal!
+                No active debate topic found.
               </div>
             )}
           </div>
 
-          {/* 2. Weekly Award Quiz (5 cols) */}
           <div className="lg:col-span-5 bg-gradient-to-br from-emerald-900 via-emerald-950 to-slate-950 text-white rounded-3xl p-6 sm:p-8 shadow-md flex flex-col justify-between relative overflow-hidden min-h-[460px]">
             <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none">
               <Award className="h-44 w-44 text-white" />
@@ -378,7 +377,6 @@ export default function EcoPulseSection() {
                 {currentQuiz.question}
               </h4>
 
-              {/* Quiz Options */}
               <div className="space-y-2.5">
                 {currentQuiz.options?.map((opt, idx) => {
                   let buttonStyle = "bg-white/10 hover:bg-white/20 border-white/10 text-emerald-50";
@@ -414,9 +412,8 @@ export default function EcoPulseSection() {
                 })}
               </div>
 
-              {/* Feedback Explanation */}
               {isSubmitted && (
-                <div className="mt-4 p-3 rounded-xl bg-white/10 border border-white/10 text-xs text-emerald-100 animate-in fade-in">
+                <div className="mt-4 p-3 rounded-xl bg-white/10 border border-white/10 text-xs text-emerald-100">
                   <p className="font-bold text-white mb-1">
                     {selectedAnswer === currentQuiz.correctIndex ? "Correct Answer!" : "Not quite right!"}
                   </p>
@@ -425,7 +422,6 @@ export default function EcoPulseSection() {
               )}
             </div>
 
-            {/* Submit CTA */}
             <div className="mt-6 pt-4 border-t border-emerald-800/80 flex items-center justify-between">
               <span className="text-[11px] text-emerald-300">
                 Top responders acknowledged weekly
@@ -453,10 +449,8 @@ export default function EcoPulseSection() {
               )}
             </div>
           </div>
-
         </div>
 
-        {/* 3. Ongoing Multi-Item News & Topic Feed Stream with Likes & Comments */}
         <div className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-xs">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-6 border-b border-slate-100 gap-2">
             <div>
@@ -513,7 +507,6 @@ export default function EcoPulseSection() {
                     </p>
                   </div>
 
-                  {/* Likes, Dislikes & Comments Section */}
                   <div className="mt-4 pt-3 border-t border-slate-200/70 space-y-3">
                     <div className="flex items-center gap-3">
                       <button
@@ -535,7 +528,6 @@ export default function EcoPulseSection() {
                       </span>
                     </div>
 
-                    {/* Comments list & input */}
                     <div className="space-y-2 max-h-32 overflow-y-auto pr-1">
                       {article.comments?.map((c: any, cIdx: number) => (
                         <div key={cIdx} className="p-2 rounded-xl bg-white border border-slate-200 text-[11px]">

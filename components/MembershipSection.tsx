@@ -3,9 +3,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { db, auth } from "@/lib/firebase";
-import { collection, onSnapshot, doc, setDoc } from "firebase/firestore";
-import { onAuthStateChanged } from "firebase/auth";
+import { useUser } from "@clerk/nextjs";
 import { 
   Users, 
   ShieldCheck, 
@@ -22,7 +20,6 @@ import {
   Lock
 } from "lucide-react";
 
-// Official 64 Members
 const OFFICIAL_MEMBERS = [
   "Abigael Chebet", "Amanda Matata", "Andrew Sawe", "Annabel Odege", "Babra Cherop",
   "Bett Kimutai", "Bonface Njogu", "Celestine kiptoo", "Charles Nderitu", "Claire Njeri",
@@ -52,50 +49,46 @@ interface UserProfile {
 
 export default function MembershipSection() {
   const router = useRouter();
-  const [currentUserUid, setCurrentUserUid] = useState<string | null>(null);
-  const [currentUserEmail, setCurrentUserEmail] = useState<string>("");
+  const { user } = useUser();
   const [firestoreMembers, setFirestoreMembers] = useState<UserProfile[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Modals and form state
   const [showYesModal, setShowYesModal] = useState(false);
   const [showVerifyModal, setShowVerifyModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [verificationSubmitted, setVerificationSubmitted] = useState(false);
 
-  // Direct Message Modal State
   const [selectedRecipient, setSelectedRecipient] = useState<UserProfile | null>(null);
   const [directMessageText, setDirectMessageText] = useState("");
   const [sendingMsg, setSendingMsg] = useState(false);
   const [msgSuccess, setMsgSuccess] = useState(false);
 
-  // Verification Form fields
   const [verifyName, setVerifyName] = useState("");
   const [verifyEmail, setVerifyEmail] = useState("");
   const [verifyYear, setVerifyYear] = useState("Year 1");
 
   useEffect(() => {
-    const unsubAuth = onAuthStateChanged(auth, (user) => {
-      if (user) {
-        setCurrentUserUid(user.uid);
-        setCurrentUserEmail(user.email || "");
+    const fetchMembers = async () => {
+      try {
+        const res = await fetch("/api/members");
+        const data = await res.json();
+        if (data.members) {
+          const mapped = data.members.map((m: any) => ({
+            ...m,
+            uid: m.clerkId || m.uid,
+            isRegisteredAccount: true,
+          }));
+          setFirestoreMembers(mapped);
+        }
+      } catch (err) {
+        console.error("Failed to load members:", err);
       }
-    });
-
-    const unsubFirestore = onSnapshot(collection(db, "members"), (snapshot) => {
-      const members = snapshot.docs.map((d) => ({
-        ...(d.data() as UserProfile),
-        isRegisteredAccount: true, // Marker that this member has logged in / created an account
-      }));
-      setFirestoreMembers(members);
-    });
-
-    return () => {
-      unsubAuth();
-      unsubFirestore();
     };
+
+    fetchMembers();
   }, []);
 
+  const currentEmail = user?.primaryEmailAddress?.emailAddress || "";
   const claimedNames = firestoreMembers.map((m) => (m.displayName || "").toLowerCase());
   
   const unclaimedOfficial: UserProfile[] = OFFICIAL_MEMBERS
@@ -107,7 +100,7 @@ export default function MembershipSection() {
       course: "Registered Member",
       year: "",
       status: "Approved",
-      isRegisteredAccount: false, // Has never logged into the website yet
+      isRegisteredAccount: false,
     }));
 
   const allDirectoryMembers = [...unclaimedOfficial, ...firestoreMembers]
@@ -116,7 +109,7 @@ export default function MembershipSection() {
 
   const handleSelectName = (selectedName: string) => {
     setVerifyName(selectedName);
-    setVerifyEmail(currentUserEmail || "");
+    setVerifyEmail(currentEmail);
     setVerifyYear("Year 1");
     setVerificationSubmitted(false);
     setShowYesModal(false);
@@ -128,78 +121,50 @@ export default function MembershipSection() {
     setIsSubmitting(true);
 
     try {
-      const targetUid = currentUserUid || `member_${Date.now()}`;
-
-      await setDoc(
-        doc(db, "members", targetUid),
-        {
-          uid: targetUid,
+      const res = await fetch("/api/member", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
           displayName: verifyName.trim(),
-          email: verifyEmail.trim(),
+          course: "Mechanical Engineering",
           year: verifyYear,
           status: "Pending",
-          appliedAt: new Date().toISOString(),
-        },
-        { merge: true }
-      );
+        }),
+      });
 
-      try {
-        await fetch("/api/send-verification", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            name: verifyName.trim(),
-            email: verifyEmail.trim(),
-            year: verifyYear,
-          }),
-        });
-      } catch (mailErr) {
-        console.warn("Mail route ping issue:", mailErr);
-      }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to submit verification");
 
       setVerificationSubmitted(true);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Verification submit error:", err);
-      alert("Failed to submit verification. Please check your connection.");
+      alert("Failed to submit verification: " + err.message);
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  // Send Direct Message & Trigger Brevo Email (Private: sender and recipient only)
   const handleSendDirectMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedRecipient || !directMessageText.trim() || !auth.currentUser) return;
+    if (!selectedRecipient || !directMessageText.trim() || !user) {
+      if (!user) alert("Please log in to send a private message.");
+      return;
+    }
 
     setSendingMsg(true);
     try {
-      // 1. Store message privately in Firestore inbox for the recipient only
-      const { addDoc } = await import("firebase/firestore");
-      await addDoc(collection(db, "member_messages"), {
-        recipientUid: selectedRecipient.uid,
-        recipientEmail: selectedRecipient.email || "",
-        recipientName: selectedRecipient.displayName,
-        senderName: auth.currentUser.displayName || "Club Member",
-        senderEmail: auth.currentUser.email,
-        senderUid: auth.currentUser.uid,
-        message: directMessageText.trim(),
-        createdAt: new Date().toISOString(),
-        read: false,
+      const res = await fetch("/api/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          recipientUid: selectedRecipient.uid,
+          recipientEmail: selectedRecipient.email || "",
+          recipientName: selectedRecipient.displayName,
+          message: directMessageText.trim(),
+        }),
       });
 
-      // 2. Dispatch email via Brevo if recipient has an email on record
-      if (selectedRecipient.email) {
-        await fetch("/api/members/message", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            recipientEmail: selectedRecipient.email,
-            recipientName: selectedRecipient.displayName,
-            senderName: auth.currentUser.displayName || "Club Member",
-            message: directMessageText.trim(),
-          }),
-        });
-      }
+      if (!res.ok) throw new Error("Failed to send message");
 
       setMsgSuccess(true);
       setDirectMessageText("");
@@ -218,7 +183,6 @@ export default function MembershipSection() {
     <section id="membership-section" className="py-10 bg-slate-50 min-h-screen">
       <div className="max-w-7xl mx-auto px-4 sm:px-6">
         
-        {/* Section Header */}
         <div className="mb-8 border-b border-slate-200 pb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider text-emerald-800 bg-emerald-100 border border-emerald-200">
@@ -242,7 +206,6 @@ export default function MembershipSection() {
           </button>
         </div>
 
-        {/* ===================== GATE QUESTION BANNER ===================== */}
         <div className="mb-8 p-6 rounded-3xl bg-gradient-to-r from-emerald-900 to-emerald-950 text-white border border-emerald-800/80 shadow-md flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div>
             <h3 className="text-lg sm:text-xl font-black flex items-center gap-2">
@@ -264,7 +227,7 @@ export default function MembershipSection() {
             <button
               onClick={() => {
                 setVerifyName("");
-                setVerifyEmail(currentUserEmail || "");
+                setVerifyEmail(currentEmail);
                 setVerifyYear("Year 1");
                 setVerificationSubmitted(false);
                 setShowVerifyModal(true);
@@ -276,10 +239,7 @@ export default function MembershipSection() {
           </div>
         </div>
 
-        {/* ======================= DIRECTORY BOARD ======================= */}
         <div className="bg-white rounded-3xl border border-slate-200 shadow-xs overflow-hidden">
-          
-          {/* Board Header & Search */}
           <div className="bg-emerald-950 p-6 sm:p-8 flex flex-col md:flex-row md:items-center justify-between gap-6 text-white">
             <div>
               <h3 className="text-xl sm:text-2xl font-black flex items-center gap-2">
@@ -303,7 +263,6 @@ export default function MembershipSection() {
             </div>
           </div>
 
-          {/* Members Grid */}
           <div className="p-6 sm:p-8 max-h-[650px] overflow-y-auto">
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {allDirectoryMembers.map((member) => {
@@ -375,14 +334,12 @@ export default function MembershipSection() {
               )}
             </div>
           </div>
-
         </div>
 
       </div>
 
-      {/* ===================== MODAL: DIRECT MESSAGE MEMBER (PRIVATE) ===================== */}
       {selectedRecipient && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
           <div className="bg-white w-full max-w-md rounded-3xl p-6 sm:p-8 shadow-2xl border border-slate-200 space-y-4">
             <div className="flex items-center justify-between pb-4 border-b border-slate-100">
               <div className="flex items-center gap-3">
@@ -405,7 +362,7 @@ export default function MembershipSection() {
             {msgSuccess ? (
               <div className="p-6 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-center space-y-2">
                 <CheckCircle2 className="h-8 w-8 text-emerald-600 mx-auto" />
-                <p className="font-bold text-sm">Private Message & Email Dispatched!</p>
+                <p className="font-bold text-sm">Private Message Dispatched!</p>
                 <p className="text-xs text-slate-600">They have been notified in their private portal inbox.</p>
               </div>
             ) : (
@@ -435,9 +392,8 @@ export default function MembershipSection() {
         </div>
       )}
 
-      {/* ===================== MODAL 1: SELECT NAME FROM ROSTER ===================== */}
       {showYesModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
           <div className="bg-white w-full max-w-md rounded-3xl p-6 shadow-2xl border border-slate-200">
             <div className="flex items-center justify-between pb-4 border-b border-slate-100">
               <h4 className="font-black text-slate-900 text-base flex items-center gap-2">
@@ -472,9 +428,8 @@ export default function MembershipSection() {
         </div>
       )}
 
-      {/* ===================== MODAL 2: VERIFICATION FORM ===================== */}
       {showVerifyModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
           <div className="bg-white w-full max-w-md rounded-3xl p-6 sm:p-8 shadow-2xl border border-slate-200">
             <div className="flex items-center justify-between pb-4 border-b border-slate-100">
               <h4 className="font-black text-slate-900 text-base">

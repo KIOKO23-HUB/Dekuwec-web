@@ -2,14 +2,13 @@
 "use client";
 
 import { useRef, useState, useEffect } from "react";
-import { auth, db } from "@/lib/firebase";
-import { collection, query, orderBy, onSnapshot, doc, setDoc, getDoc, deleteDoc } from "firebase/firestore";
+import { useUser } from "@clerk/nextjs";
 import { ChevronLeft, ChevronRight, Calendar, ExternalLink, MapPin, CheckCircle2, Users } from "lucide-react";
 
 export interface ClubEvent {
   id: string;
   title: string;
-  statement12Words: string; // Small bold statement (up to 12 words)
+  statement12Words: string;
   date: string;
   venue: string;
   imageUrl: string;
@@ -19,7 +18,6 @@ export interface ClubEvent {
   createdAt?: any;
 }
 
-// Fallback baseline data when Firestore has no records
 const SAMPLE_UPCOMING: ClubEvent[] = [
   {
     id: "up-1",
@@ -221,81 +219,63 @@ function EventSlider({ title, subtitle, badge, events, participatingIds, onToggl
 }
 
 export default function EventsSection() {
+  const { user, isLoaded } = useUser();
   const [upcomingEvents, setUpcomingEvents] = useState<ClubEvent[]>(SAMPLE_UPCOMING);
   const [previousEvents, setPreviousEvents] = useState<ClubEvent[]>(SAMPLE_PREVIOUS);
   const [participatingIds, setParticipatingIds] = useState<{ [key: string]: boolean }>({});
   const [successToast, setSuccessToast] = useState<string | null>(null);
 
   useEffect(() => {
-    // 1. Listen to all events in Firestore sorted newest first
-    const q = query(collection(db, "events"), orderBy("createdAt", "desc"));
-    const unsubscribeEvents = onSnapshot(q, (snapshot) => {
-      if (!snapshot.empty) {
-        const liveDocs = snapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-        })) as ClubEvent[];
-
-        const liveUpcoming = liveDocs.filter((e) => e.type === "upcoming");
-        const livePrevious = liveDocs.filter((e) => e.type === "previous");
-
-        setUpcomingEvents(liveUpcoming.length > 0 ? liveUpcoming : SAMPLE_UPCOMING);
-        setPreviousEvents(livePrevious.length > 0 ? livePrevious : SAMPLE_PREVIOUS);
-      } else {
-        setUpcomingEvents(SAMPLE_UPCOMING);
-        setPreviousEvents(SAMPLE_PREVIOUS);
+    const fetchEvents = async () => {
+      try {
+        const res = await fetch("/api/events");
+        const data = await res.json();
+        if (data.events && data.events.length > 0) {
+          const liveUpcoming = data.events.filter((e: ClubEvent) => e.type === "upcoming");
+          const livePrevious = data.events.filter((e: ClubEvent) => e.type === "previous");
+          setUpcomingEvents(liveUpcoming.length > 0 ? liveUpcoming : SAMPLE_UPCOMING);
+          setPreviousEvents(livePrevious.length > 0 ? livePrevious : SAMPLE_PREVIOUS);
+        }
+      } catch (err) {
+        console.error("Failed to load events:", err);
       }
-    });
-
-    // 2. Listen to user's participations if logged in
-    let unsubscribeParticipations = () => {};
-    if (auth.currentUser) {
-      const partQuery = query(collection(db, "event_participants"));
-      unsubscribeParticipations = onSnapshot(partQuery, (snapshot) => {
-        const userMap: { [key: string]: boolean } = {};
-        snapshot.docs.forEach((docSnap) => {
-          const data = docSnap.data();
-          if (data.userId === auth.currentUser?.uid) {
-            userMap[data.eventId] = true;
-          }
-        });
-        setParticipatingIds(userMap);
-      });
-    }
-
-    return () => {
-      unsubscribeEvents();
-      unsubscribeParticipations();
     };
+
+    fetchEvents();
   }, []);
 
   const handleToggleParticipate = async (evt: ClubEvent) => {
-    if (!auth.currentUser) {
+    if (!user) {
       alert("Please log in to record your event participation.");
       return;
     }
 
-    const participantDocId = `${evt.id}_${auth.currentUser.uid}`;
-    const docRef = doc(db, "event_participants", participantDocId);
-
     try {
-      const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) {
-        // Cancel participation
-        await deleteDoc(docRef);
-        setSuccessToast(`Cancelled participation for "${evt.title}".`);
-      } else {
-        // Register participation
-        await setDoc(docRef, {
+      const res = await fetch("/api/events/participate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
           eventId: evt.id,
           eventTitle: evt.title,
-          userId: auth.currentUser.uid,
-          userName: auth.currentUser.displayName || "Club Member",
-          userEmail: auth.currentUser.email || "",
-          timestamp: new Date().toISOString(),
-        });
-        setSuccessToast(`Successfully registered your interest for "${evt.title}"! Executive team notified.`);
-      }
+          userId: user.id,
+          userName: user.fullName || user.firstName || "Club Member",
+          userEmail: user.primaryEmailAddress?.emailAddress || "",
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to update participation");
+
+      setParticipatingIds((prev) => ({
+        ...prev,
+        [evt.id]: data.participating,
+      }));
+
+      setSuccessToast(
+        data.participating
+          ? `Successfully registered your interest for "${evt.title}"!`
+          : `Cancelled participation for "${evt.title}".`
+      );
       setTimeout(() => setSuccessToast(null), 4000);
     } catch (err: any) {
       alert("Failed to update participation: " + err.message);
@@ -306,7 +286,6 @@ export default function EventsSection() {
     <section id="events-section" className="py-12 bg-slate-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6">
         
-        {/* Header */}
         <div className="text-center max-w-2xl mx-auto mb-12">
           <h2 className="text-3xl font-extrabold text-slate-900 sm:text-4xl">
             Events & Outdoor Activities
@@ -326,7 +305,6 @@ export default function EventsSection() {
           </div>
         )}
 
-        {/* 1. Upcoming Events Slider */}
         <EventSlider
           title="Upcoming Club Events"
           subtitle="Join our next excursions, cleanups, and community gatherings. Click 'Want to Participate' to notify the admins."
@@ -336,7 +314,6 @@ export default function EventsSection() {
           onToggleParticipate={handleToggleParticipate}
         />
 
-        {/* 2. Previous Events Slider */}
         <EventSlider
           title="Previous Events & Highlights"
           subtitle="Snapshots and records from earlier sessions this semester."
@@ -346,7 +323,6 @@ export default function EventsSection() {
           onToggleParticipate={handleToggleParticipate}
         />
 
-        {/* 3. Link Archive for Previous Events */}
         <div className="mt-16 bg-white rounded-2xl border border-slate-200 p-6 sm:p-8 shadow-xs">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-6 border-b border-slate-100 gap-2">
             <div>

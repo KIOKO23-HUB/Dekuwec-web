@@ -2,8 +2,6 @@
 "use client";
 
 import { useRef, useState, useEffect } from "react";
-import { db } from "@/lib/firebase";
-import { collection, query, orderBy, onSnapshot } from "firebase/firestore";
 import { 
   Camera, 
   ChevronLeft, 
@@ -28,7 +26,6 @@ export interface NatureSnap {
   createdAt?: any;
 }
 
-// Sample fallback data if Firestore has no records
 const SAMPLE_SNAPS: NatureSnap[] = [
   {
     id: "snap-1",
@@ -79,21 +76,19 @@ export default function NatureSnapsSection() {
   const GOOGLE_PHOTOS_ALBUM_URL = "https://photos.google.com";
 
   useEffect(() => {
-    // Stream nature snaps live from Firestore, newest first
-    const q = query(collection(db, "nature_snaps"), orderBy("createdAt", "desc"));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      if (!snapshot.empty) {
-        const liveDocs = snapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-        })) as NatureSnap[];
-        setSnaps(liveDocs);
-      } else {
-        setSnaps(SAMPLE_SNAPS);
+    const fetchSnaps = async () => {
+      try {
+        const res = await fetch("/api/nature-snaps");
+        const data = await res.json();
+        if (data.snaps && data.snaps.length > 0) {
+          setSnaps(data.snaps);
+        }
+      } catch (err) {
+        console.error("Failed to load nature snaps:", err);
       }
-    });
+    };
 
-    return () => unsubscribe();
+    fetchSnaps();
   }, []);
 
   const scroll = (direction: "left" | "right") => {
@@ -110,7 +105,6 @@ export default function NatureSnapsSection() {
     <section id="snaps-section" className="py-14 bg-slate-50 min-h-screen">
       <div className="max-w-7xl mx-auto px-4 sm:px-6">
 
-        {/* Section Header */}
         <div className="flex flex-col md:flex-row md:items-end justify-between mb-10 gap-4">
           <div>
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider text-emerald-800 bg-emerald-100 border border-emerald-200">
@@ -125,7 +119,6 @@ export default function NatureSnapsSection() {
             </p>
           </div>
 
-          {/* Slider Left/Right Arrows */}
           <div className="flex items-center gap-2 self-start md:self-end">
             <button
               onClick={() => scroll("left")}
@@ -144,7 +137,6 @@ export default function NatureSnapsSection() {
           </div>
         </div>
 
-        {/* Horizontal Carousel (Left-to-Right Scrolling) */}
         <div
           ref={scrollContainerRef}
           className="flex gap-6 overflow-x-auto pb-6 pt-2 snap-x snap-mandatory scrollbar-none"
@@ -155,7 +147,6 @@ export default function NatureSnapsSection() {
               key={snap.id}
               className="w-[320px] sm:w-[420px] flex-shrink-0 snap-start rounded-3xl overflow-hidden bg-white border border-slate-200 shadow-sm hover:shadow-lg transition-all group flex flex-col"
             >
-              {/* Photo Area */}
               <div className="relative h-72 sm:h-80 w-full overflow-hidden bg-slate-900">
                 <img
                   src={snap.imageUrl}
@@ -164,7 +155,6 @@ export default function NatureSnapsSection() {
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent"></div>
 
-                {/* Badges Overlay */}
                 <div className="absolute top-4 left-4 right-4 flex items-center justify-between">
                   <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-500/90 text-slate-950 backdrop-blur-sm shadow">
                     <Trophy className="h-3.5 w-3.5" />
@@ -175,7 +165,6 @@ export default function NatureSnapsSection() {
                   </span>
                 </div>
 
-                {/* Bottom Overlay Info */}
                 <div className="absolute bottom-4 left-5 right-5 text-white">
                   <h3 className="text-lg sm:text-xl font-black leading-tight drop-shadow-sm">
                     {snap.title}
@@ -186,7 +175,6 @@ export default function NatureSnapsSection() {
                 </div>
               </div>
 
-              {/* Card Meta Footer */}
               <div className="p-5 flex items-center justify-between bg-white">
                 <div className="flex items-center gap-3">
                   <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-100 text-emerald-800 font-bold text-sm">
@@ -208,7 +196,6 @@ export default function NatureSnapsSection() {
           ))}
         </div>
 
-        {/* Google Photos Album CTA Banner */}
         <div className="mt-12 relative overflow-hidden rounded-3xl bg-gradient-to-r from-emerald-900 to-emerald-950 text-white p-8 sm:p-12 shadow-md">
           <div className="absolute right-0 top-0 h-full w-1/3 bg-[radial-gradient(#10b981_1px,transparent_1px)] [background-size:16px_16px] opacity-20 pointer-events-none"></div>
 
@@ -238,7 +225,6 @@ export default function NatureSnapsSection() {
           </div>
         </div>
 
-        {/* Contest Info Cards */}
         <div className="mt-8 grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="p-5 rounded-2xl bg-white border border-slate-200">
             <h4 className="font-bold text-slate-800 text-sm flex items-center gap-2">

@@ -2,8 +2,6 @@
 "use client";
 
 import { useState } from "react";
-import { db } from "@/lib/firebase";
-import { collection, addDoc, serverTimestamp } from "firebase/firestore";
 import { 
   LifeBuoy, 
   MapPin, 
@@ -44,18 +42,7 @@ export default function SupportSection() {
     setLoading(true);
 
     try {
-      // 1. Save message directly to Firestore 'contact_messages' collection
-      await addDoc(collection(db, "contact_messages"), {
-        name: name.trim(),
-        email: email.trim().toLowerCase(),
-        subject: subject.trim() || "General Enquiry",
-        message: message.trim(),
-        createdAt: serverTimestamp(),
-        status: "unread",
-      });
-
-      // 2. Dispatch automated confirmation emails (Club alert + Inquirer confirmation)
-      const emailResponse = await fetch("/api/notify-support", {
+      const res = await fetch("/api/support", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -66,12 +53,10 @@ export default function SupportSection() {
         }),
       });
 
-      if (!emailResponse.ok) {
-        console.warn("Message saved in database, but confirmation email dispatch failed.");
-      }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to send message");
 
       setSuccess(true);
-      // Reset form fields
       setName("");
       setEmail("");
       setSubject("");
@@ -88,7 +73,6 @@ export default function SupportSection() {
     <section id="support-section" className="py-14 bg-slate-50 min-h-screen">
       <div className="max-w-7xl mx-auto px-4 sm:px-6">
 
-        {/* Section Header */}
         <div className="text-center max-w-2xl mx-auto mb-12">
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider text-emerald-800 bg-emerald-100 border border-emerald-200">
             <LifeBuoy className="h-3.5 w-3.5 text-emerald-700" />
@@ -104,10 +88,7 @@ export default function SupportSection() {
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
           
-          {/* Left Column: Direct Info & Meeting Details (5 cols) */}
           <div className="lg:col-span-5 space-y-6">
-            
-            {/* Meeting Schedule Box */}
             <div className="bg-emerald-900 text-white rounded-3xl p-6 sm:p-8 shadow-sm">
               <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
                 <Clock className="h-5 w-5 text-emerald-400" />
@@ -129,7 +110,6 @@ export default function SupportSection() {
               </div>
             </div>
 
-            {/* Direct Contact Points */}
             <div className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-xs space-y-5">
               <h4 className="font-bold text-slate-900 text-base">Direct Channels</h4>
               
@@ -163,7 +143,6 @@ export default function SupportSection() {
 
           </div>
 
-          {/* Right Column: Contact Message Form (7 cols) */}
           <div className="lg:col-span-7 bg-white rounded-3xl border border-slate-200 p-6 sm:p-10 shadow-xs">
             <h3 className="text-xl sm:text-2xl font-bold text-slate-900 mb-2">Send Us a Direct Note</h3>
             <p className="text-xs sm:text-sm text-slate-500 mb-6">

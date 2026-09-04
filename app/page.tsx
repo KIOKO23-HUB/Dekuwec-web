@@ -2,6 +2,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useUser } from "@clerk/nextjs";
 import Navbar from "@/components/Navbar";
 import EventsSection from "@/components/EventsSection";
 import EcoPulseSection from "@/components/EcoPulseSection";
@@ -11,18 +12,6 @@ import SupportSection from "@/components/SupportSection";
 import AccountPage from "@/app/account/page";
 import MessagesTab from "@/components/MessagesTab";
 import NotificationsTab from "@/components/NotificationsTab";
-import { db, auth } from "@/lib/firebase";
-import { 
-  collection, 
-  query, 
-  orderBy, 
-  onSnapshot, 
-  doc, 
-  setDoc, 
-  updateDoc, 
-  increment,
-  where 
-} from "firebase/firestore";
 import { 
   Heart, 
   Menu, 
@@ -79,135 +68,17 @@ const DEFAULT_SLIDES: SlideItem[] = [
 ];
 
 export default function Home() {
+  const { user, isLoaded } = useUser();
   const [activeTab, setActiveTab] = useState<string>("home");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [slides, setSlides] = useState<SlideItem[]>(DEFAULT_SLIDES);
   const [currentSlide, setCurrentSlide] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
 
-  // Unread message count state for top bar pill
   const [unreadMessages, setUnreadMessages] = useState(0);
-
-  // Likes Counter State
   const [likesCount, setLikesCount] = useState<number>(128);
   const [hasLiked, setHasLiked] = useState<boolean>(false);
   const [likeAnimating, setLikeAnimating] = useState(false);
-
-  // 1. Sync Unread Messages Count
-  useEffect(() => {
-    if (!auth.currentUser) return;
-    const q = query(
-      collection(db, "member_messages"),
-      where("recipientUid", "==", auth.currentUser.uid),
-      where("read", "==", false)
-    );
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setUnreadMessages(snapshot.size);
-    });
-    return () => unsubscribe();
-  }, []);
-
-  // 2. Sync Live Uploaded Images into Hero Slider
-  useEffect(() => {
-    const qEvents = query(collection(db, "events"), orderBy("createdAt", "desc"));
-    const qSnaps = query(collection(db, "nature_snaps"), orderBy("createdAt", "desc"));
-
-    let liveEventSlides: SlideItem[] = [];
-    let liveSnapSlides: SlideItem[] = [];
-
-    const unsubEvents = onSnapshot(qEvents, (snapshot) => {
-      liveEventSlides = snapshot.docs
-        .filter((d) => Boolean(d.data().imageUrl))
-        .map((d) => {
-          const data = d.data();
-          return {
-            id: `evt-${d.id}`,
-            tag: data.type === "upcoming" ? "Upcoming Club Excursion" : "Previous Highlight",
-            title: data.title || "Club Excursion",
-            description: data.statement12Words || "Environmental conservation, biodiversity preservation, and mountaineering.",
-            date: data.date || "Scheduled Date",
-            venue: data.venue || "DKUT Grounds",
-            imageUrl: data.imageUrl,
-            ctaText: "View Events & Details",
-            targetTab: "events",
-          };
-        });
-      updateCombinedSlides();
-    });
-
-    const unsubSnaps = onSnapshot(qSnaps, (snapshot) => {
-      liveSnapSlides = snapshot.docs
-        .filter((d) => Boolean(d.data().imageUrl))
-        .map((d) => {
-          const data = d.data();
-          return {
-            id: `snap-${d.id}`,
-            tag: `Nature Snap • ${data.weekLabel || "Award Winner"}`,
-            title: data.title || "Nature Photography",
-            description: `Awarded capture by ${data.photographerName || "Club Member"}${data.cameraInfo ? ` (${data.cameraInfo})` : ""}.`,
-            date: data.semester || "Semester Active",
-            venue: data.location || "Conservation Trail",
-            imageUrl: data.imageUrl,
-            ctaText: "View Nature Gallery",
-            targetTab: "snaps",
-          };
-        });
-      updateCombinedSlides();
-    });
-
-    const updateCombinedSlides = () => {
-      const merged = [...liveEventSlides, ...liveSnapSlides];
-      if (merged.length > 0) {
-        setSlides(merged);
-      } else {
-        setSlides(DEFAULT_SLIDES);
-      }
-    };
-
-    return () => {
-      unsubEvents();
-      unsubSnaps();
-    };
-  }, []);
-
-  // 3. Sync Likes Counter
-  useEffect(() => {
-    const liked = localStorage.getItem("dekuwec_site_liked") === "true";
-    setHasLiked(liked);
-
-    const statsRef = doc(db, "site_stats", "likes");
-    const unsubLikes = onSnapshot(statsRef, (docSnap) => {
-      if (docSnap.exists()) {
-        setLikesCount(docSnap.data().count ?? 128);
-      } else {
-        setDoc(statsRef, { count: 128 }, { merge: true });
-      }
-    });
-
-    return () => unsubLikes();
-  }, []);
-
-  const handleLikeToggle = async () => {
-    setLikeAnimating(true);
-    setTimeout(() => setLikeAnimating(false), 500);
-
-    const statsRef = doc(db, "site_stats", "likes");
-    try {
-      if (!hasLiked) {
-        setHasLiked(true);
-        setLikesCount((prev) => prev + 1);
-        localStorage.setItem("dekuwec_site_liked", "true");
-        await updateDoc(statsRef, { count: increment(1) });
-      } else {
-        setHasLiked(false);
-        setLikesCount((prev) => Math.max(0, prev - 1));
-        localStorage.removeItem("dekuwec_site_liked");
-        await updateDoc(statsRef, { count: increment(-1) });
-      }
-    } catch (err) {
-      console.error("Failed to update likes:", err);
-    }
-  };
 
   // Auto slide cycle
   useEffect(() => {
@@ -218,6 +89,14 @@ export default function Home() {
     return () => clearInterval(interval);
   }, [isPaused, activeTab, slides.length]);
 
+  const handleLikeToggle = () => {
+    setLikeAnimating(true);
+    setTimeout(() => setLikeAnimating(false), 500);
+    const newLiked = !hasLiked;
+    setHasLiked(newLiked);
+    setLikesCount((prev) => (newLiked ? prev + 1 : Math.max(0, prev - 1)));
+  };
+
   const prevSlide = () => {
     setCurrentSlide((prev) => (prev - 1 + slides.length) % slides.length);
   };
@@ -227,22 +106,24 @@ export default function Home() {
   };
 
   const activeItem = slides[currentSlide] || slides[0];
+  const NavbarComponent = Navbar as any;
 
   return (
     <div className="min-h-screen flex bg-slate-50 text-slate-900 font-sans selection:bg-emerald-100 selection:text-emerald-900">
       
       {/* Left Navigation Sidebar */}
-      <Navbar 
+      <NavbarComponent 
         activeTab={activeTab} 
         setActiveTab={setActiveTab} 
-        mobileMenuOpen={mobileMenuOpen}
+        mobileMenuOpen={mobileMenuOpen} 
         setMobileMenuOpen={setMobileMenuOpen}
+        user={user}
       />
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 lg:pl-72">
         
-        {/* Top App Header with Messages, Notifications & Likes */}
+        {/* Top App Header */}
         <header className="sticky top-0 z-30 bg-white/90 backdrop-blur-md border-b border-slate-200 px-4 sm:px-8 py-3.5 flex items-center justify-between shadow-xs">
           <div className="flex items-center gap-3">
             <button
@@ -278,10 +159,7 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Top Bar Right Actions: Messages, Notifications, and Likes */}
           <div className="flex items-center gap-2 sm:gap-3">
-            
-            {/* Messages Button */}
             <button
               onClick={() => setActiveTab("messages")}
               className={`relative p-2 rounded-xl border transition flex items-center justify-center ${
@@ -299,7 +177,6 @@ export default function Home() {
               )}
             </button>
 
-            {/* Notifications Button */}
             <button
               onClick={() => setActiveTab("notifications")}
               className={`p-2 rounded-xl border transition flex items-center justify-center ${
@@ -312,14 +189,13 @@ export default function Home() {
               <Bell className="h-4 w-4" />
             </button>
 
-            {/* Like Pill */}
             <button
               onClick={handleLikeToggle}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${
                 hasLiked
                   ? "bg-rose-50 text-rose-600 border-rose-200 shadow-xs"
                   : "bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200"
-              } ${likeAnimating ? "scale-110" : "scale-100"}`}
+              }`}
               title="Like this portal"
             >
               <Heart
@@ -334,10 +210,8 @@ export default function Home() {
 
         {/* View Switcher */}
         <main className="flex-grow">
-          {/* ===================== TAB 0: HOME PAGE ===================== */}
           {activeTab === "home" && (
             <div>
-              {/* Single Hero Slider Displaying All Uploaded Images */}
               <section 
                 className="relative min-h-[580px] lg:min-h-[660px] flex items-center overflow-hidden bg-slate-950 text-white"
                 onMouseEnter={() => setIsPaused(true)}
@@ -380,7 +254,6 @@ export default function Home() {
                   </>
                 )}
 
-                {/* Hero Overlay Content */}
                 <div className="relative z-20 mx-auto max-w-5xl px-6 sm:px-14 py-16 sm:py-20 w-full">
                   <div className="max-w-2xl space-y-5 sm:space-y-6">
                     <div className="inline-flex items-center gap-2 rounded-full bg-emerald-500/20 px-3.5 py-1 text-xs font-bold text-emerald-300 border border-emerald-400/30 backdrop-blur-md">
@@ -426,7 +299,6 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* Dot Pagination */}
                 {slides.length > 1 && (
                   <div className="absolute bottom-6 left-0 right-0 z-30 flex justify-center items-center gap-2">
                     {slides.map((_, dotIdx) => (
@@ -445,7 +317,6 @@ export default function Home() {
                 )}
               </section>
 
-              {/* Hub Navigator */}
               <section className="py-16 bg-white border-b border-slate-200">
                 <div className="max-w-6xl mx-auto px-4 sm:px-6">
                   <div className="text-center max-w-xl mx-auto mb-10">
@@ -511,7 +382,6 @@ export default function Home() {
             </div>
           )}
 
-          {/* Sub-view Routing */}
           {activeTab === "events" && <EventsSection />}
           {activeTab === "ecopulse" && <EcoPulseSection />}
           {activeTab === "snaps" && <NatureSnapsSection />}
@@ -522,7 +392,6 @@ export default function Home() {
           {activeTab === "support" && <SupportSection />}
         </main>
 
-        {/* Global Footer with Social Channels */}
         <footer className="border-t border-slate-200 bg-white py-10 px-4 sm:px-8">
           <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-6">
             <div className="flex items-center gap-3 text-emerald-900 font-bold text-sm">
@@ -534,7 +403,6 @@ export default function Home() {
               <span>Dedan Kimathi Wildlife & Environmental Club</span>
             </div>
 
-            {/* Social Icons Strip */}
             <div className="flex items-center gap-3">
               <a
                 href="https://www.instagram.com/wildlifeandenvironmentalclub/"

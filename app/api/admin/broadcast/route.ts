@@ -1,6 +1,6 @@
 // app/api/admin/broadcast/route.ts
 import { NextResponse } from "next/server";
-import { db } from "@/lib/firebase";
+import { db } from "@/lib/mongodb";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 
 export async function POST(req: Request) {

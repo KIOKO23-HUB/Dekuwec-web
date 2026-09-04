@@ -2,8 +2,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { auth, db } from "@/lib/firebase";
-import { collection, query, where, onSnapshot } from "firebase/firestore";
+import { useUser } from "@clerk/nextjs";
 import { 
   Home, 
   Calendar, 
@@ -22,6 +21,7 @@ interface NavbarProps {
   setActiveTab: (tab: string) => void;
   mobileMenuOpen: boolean;
   setMobileMenuOpen: (open: boolean) => void;
+  user?: any;
 }
 
 const LOGO_URL = "https://i.postimg.cc/HLsfSHMm/Whats-App-Image-2026-09-03-at-09-49-04.jpg";
@@ -72,31 +72,38 @@ export default function Navbar({
   setActiveTab,
   mobileMenuOpen,
   setMobileMenuOpen,
+  user: propUser,
 }: NavbarProps) {
+  const { user: clerkUser, isLoaded } = useUser();
+  const activeUser = propUser || (isLoaded ? clerkUser : null);
   const [unreadMessages, setUnreadMessages] = useState(0);
 
   useEffect(() => {
-    if (!auth.currentUser) return;
-    const q = query(
-      collection(db, "member_messages"),
-      where("recipientUid", "==", auth.currentUser.uid),
-      where("read", "==", false)
-    );
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setUnreadMessages(snapshot.size);
-    });
-    return () => unsubscribe();
-  }, []);
+    if (!activeUser?.id) return;
 
-  const navItems = [
+    const fetchUnread = async () => {
+      try {
+        const res = await fetch(`/api/messages?userId=${activeUser.id}`);
+        const data = await res.json();
+        if (data.messages) {
+          const unreadCount = data.messages.filter((m: any) => !m.read).length;
+          setUnreadMessages(unreadCount);
+        }
+      } catch (err) {
+        console.error("Failed to load unread messages:", err);
+      }
+    };
+
+    fetchUnread();
+  }, [activeUser?.id]);
+
+  // Main navigation list without Messages, Notifications, and Account Dashboard
+  const primaryNavItems = [
     { id: "home", label: "Home", icon: Home },
     { id: "events", label: "Events & Activities", icon: Calendar },
     { id: "ecopulse", label: "EcoPulse Dispatch", icon: Radio },
     { id: "snaps", label: "Nature Snaps", icon: Camera },
     { id: "membership", label: "Membership Portal", icon: UserPlus },
-    { id: "account", label: "Account Dashboard", icon: UserCircle },
-    { id: "messages", label: "Messages", icon: MessageSquare, badge: unreadMessages },
-    { id: "notifications", label: "Notifications", icon: Bell },
     { id: "support", label: "Support & Inquiries", icon: LifeBuoy },
   ];
 
@@ -108,7 +115,6 @@ export default function Navbar({
   const navContent = (
     <div className="flex flex-col h-full justify-between p-5">
       <div>
-        {/* Brand Header & Logo */}
         <div className="flex items-center gap-3.5 pb-6 border-b border-emerald-800/60">
           <img
             src={LOGO_URL}
@@ -125,12 +131,11 @@ export default function Navbar({
           </div>
         </div>
 
-        {/* Navigation Menu */}
         <nav className="mt-6 space-y-1.5">
           <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-400/70 px-3 mb-2">
             Navigation Menu
           </p>
-          {navItems.map((item) => {
+          {primaryNavItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
             return (
@@ -147,35 +152,46 @@ export default function Navbar({
                   <Icon className={`h-5 w-5 flex-shrink-0 ${isActive ? "text-slate-950" : "text-emerald-400"}`} />
                   <span className="truncate">{item.label}</span>
                 </div>
-                {item.badge ? (
-                  <span className="px-2 py-0.5 rounded-full bg-rose-500 text-white text-[10px] font-black flex-shrink-0">
-                    {item.badge}
-                  </span>
-                ) : null}
               </button>
             );
           })}
         </nav>
       </div>
 
-      {/* Social Media Channels at Sidebar Bottom */}
-      <div className="pt-5 border-t border-emerald-800/60">
-        <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-300 mb-3 text-center">
-          Follow Our Community
-        </p>
-        <div className="flex items-center justify-center gap-2">
-          {SOCIAL_CHANNELS.map((s) => (
-            <a
-              key={s.name}
-              href={s.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              title={s.name}
-              className="h-9 w-9 rounded-xl bg-emerald-900/90 hover:bg-emerald-500 hover:text-slate-950 text-emerald-200 flex items-center justify-center transition shadow-xs border border-emerald-700/60"
-            >
-              {s.svg}
-            </a>
-          ))}
+      {/* Bottom section with Account Dashboard and Follow Handles */}
+      <div className="space-y-4 pt-5 border-t border-emerald-800/60">
+        <button
+          onClick={() => handleSelect("account")}
+          className={`w-full flex items-center justify-between px-3.5 py-3 rounded-2xl text-sm font-bold transition-all ${
+            activeTab === "account"
+              ? "bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-950/40 font-black scale-[1.02]"
+              : "bg-emerald-900/50 text-emerald-100 hover:bg-emerald-900 hover:text-white border border-emerald-700/50"
+          }`}
+        >
+          <div className="flex items-center gap-3.5 min-w-0">
+            <UserCircle className={`h-5 w-5 flex-shrink-0 ${activeTab === "account" ? "text-slate-950" : "text-emerald-400"}`} />
+            <span className="truncate">Account Dashboard</span>
+          </div>
+        </button>
+
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-300 mb-3 text-center">
+            Follow Our Community
+          </p>
+          <div className="flex items-center justify-center gap-2">
+            {SOCIAL_CHANNELS.map((s) => (
+              <a
+                key={s.name}
+                href={s.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                title={s.name}
+                className="h-9 w-9 rounded-xl bg-emerald-900/90 hover:bg-emerald-500 hover:text-slate-950 text-emerald-200 flex items-center justify-center transition shadow-xs border border-emerald-700/60"
+              >
+                {s.svg}
+              </a>
+            ))}
+          </div>
         </div>
       </div>
     </div>
@@ -183,12 +199,42 @@ export default function Navbar({
 
   return (
     <>
-      {/* Desktop Persistent Left Sidebar */}
       <aside className="hidden lg:flex w-72 flex-col fixed inset-y-0 left-0 z-40 bg-emerald-950 text-white border-r border-emerald-900 shadow-2xl">
         {navContent}
       </aside>
 
-      {/* Mobile Drawer Overlay */}
+      {/* Floating Top Quick Actions Bar for Header (Messages & Notifications) */}
+      <div className="fixed top-4 right-6 z-30 hidden lg:flex items-center gap-2">
+        <button
+          onClick={() => setActiveTab("messages")}
+          className={`relative p-2.5 rounded-xl border transition shadow-md flex items-center justify-center ${
+            activeTab === "messages"
+              ? "bg-emerald-500 text-slate-950 border-emerald-400"
+              : "bg-slate-900/90 text-emerald-300 border-emerald-800/80 hover:bg-emerald-950 hover:text-white"
+          }`}
+          title="Messages"
+        >
+          <MessageSquare className="h-5 w-5" />
+          {unreadMessages > 0 && (
+            <span className="absolute -top-1 -right-1 px-1.5 py-0.2 rounded-full bg-rose-500 text-white text-[9px] font-black">
+              {unreadMessages}
+            </span>
+          )}
+        </button>
+
+        <button
+          onClick={() => setActiveTab("notifications")}
+          className={`relative p-2.5 rounded-xl border transition shadow-md flex items-center justify-center ${
+            activeTab === "notifications"
+              ? "bg-emerald-500 text-slate-950 border-emerald-400"
+              : "bg-slate-900/90 text-emerald-300 border-emerald-800/80 hover:bg-emerald-950 hover:text-white"
+          }`}
+          title="Notifications"
+        >
+          <Bell className="h-5 w-5" />
+        </button>
+      </div>
+
       {mobileMenuOpen && (
         <div className="fixed inset-0 z-50 lg:hidden">
           <div
@@ -196,7 +242,26 @@ export default function Navbar({
             onClick={() => setMobileMenuOpen(false)}
           />
           <div className="fixed inset-y-0 left-0 w-72 bg-emerald-950 text-white shadow-2xl z-50 flex flex-col">
-            <div className="flex justify-end p-3">
+            <div className="flex justify-between items-center p-3 border-b border-emerald-900">
+              <div className="flex items-center gap-2 px-2">
+                <button
+                  onClick={() => setActiveTab("messages")}
+                  className="relative p-2 rounded-lg bg-emerald-900 text-emerald-200"
+                >
+                  <MessageSquare className="h-4 w-4" />
+                  {unreadMessages > 0 && (
+                    <span className="absolute -top-1 -right-1 px-1 rounded-full bg-rose-500 text-white text-[8px]">
+                      {unreadMessages}
+                    </span>
+                  )}
+                </button>
+                <button
+                  onClick={() => setActiveTab("notifications")}
+                  className="p-2 rounded-lg bg-emerald-900 text-emerald-200"
+                >
+                  <Bell className="h-4 w-4" />
+                </button>
+              </div>
               <button
                 onClick={() => setMobileMenuOpen(false)}
                 className="p-2 rounded-xl bg-emerald-900 text-emerald-200 hover:text-white"

@@ -2,31 +2,43 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { auth, db } from "@/lib/firebase";
-import { collection, onSnapshot, query, orderBy, where, updateDoc, doc, addDoc } from "firebase/firestore";
+import { useUser } from "@clerk/nextjs";
 import { MessageSquare, Send, CheckCircle2 } from "lucide-react";
 
 export default function MessagesTab() {
+  const { user, isLoaded } = useUser();
   const [messages, setMessages] = useState<any[]>([]);
   const [replyText, setReplyText] = useState<{ [key: string]: string }>({});
   const [successMsg, setSuccessMsg] = useState("");
 
   useEffect(() => {
-    if (!auth.currentUser) return;
-    const qMsgs = query(
-      collection(db, "member_messages"),
-      where("recipientUid", "==", auth.currentUser.uid),
-      orderBy("createdAt", "desc")
-    );
-    const unsubscribe = onSnapshot(qMsgs, (snapshot) => {
-      setMessages(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
-    });
-    return () => unsubscribe();
-  }, []);
+    if (!isLoaded || !user) return;
+
+    const fetchMessages = async () => {
+      try {
+        const res = await fetch(`/api/messages?userId=${user.id}`);
+        const data = await res.json();
+        if (data.messages) {
+          setMessages(data.messages);
+        }
+      } catch (err) {
+        console.error("Failed to load messages:", err);
+      }
+    };
+
+    fetchMessages();
+  }, [user, isLoaded]);
 
   const handleMarkAsRead = async (msgId: string) => {
     try {
-      await updateDoc(doc(db, "member_messages", msgId), { read: true });
+      await fetch("/api/messages", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messageId: msgId, read: true }),
+      });
+      setMessages((prev) =>
+        prev.map((m) => (m.id === msgId ? { ...m, read: true } : m))
+      );
     } catch (err) {
       console.error(err);
     }
@@ -34,20 +46,27 @@ export default function MessagesTab() {
 
   const handleSendReply = async (originalMsg: any) => {
     const text = replyText[originalMsg.id];
-    if (!text || !text.trim() || !auth.currentUser) return;
+    if (!text || !text.trim() || !user) return;
 
     try {
-      await addDoc(collection(db, "member_messages"), {
-        recipientUid: originalMsg.senderUid || originalMsg.senderEmail,
-        recipientEmail: originalMsg.senderEmail,
-        recipientName: originalMsg.senderName,
-        senderName: auth.currentUser.displayName || "Club Member",
-        senderEmail: auth.currentUser.email,
-        senderUid: auth.currentUser.uid,
-        message: text.trim(),
-        createdAt: new Date().toISOString(),
-        read: false,
+      const senderDisplayName = user.fullName || user.firstName || "Club Member";
+      const senderEmailAddress = user.primaryEmailAddress?.emailAddress || "";
+
+      const res = await fetch("/api/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          recipientUid: originalMsg.senderUid || originalMsg.senderEmail,
+          recipientEmail: originalMsg.senderEmail,
+          recipientName: originalMsg.senderName,
+          senderName: senderDisplayName,
+          senderEmail: senderEmailAddress,
+          senderUid: user.id,
+          message: text.trim(),
+        }),
       });
+
+      if (!res.ok) throw new Error("Failed to send reply");
 
       setSuccessMsg("Reply sent successfully!");
       setReplyText({ ...replyText, [originalMsg.id]: "" });

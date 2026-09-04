@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { auth, db } from "@/lib/firebase";
+import { auth, db } from "@/lib/mongodb";
 import { collection, addDoc, onSnapshot, query, orderBy, doc, updateDoc, arrayUnion } from "firebase/firestore";
 import Navbar from "@/components/Navbar";
 import { Globe, Plus, ThumbsUp, ThumbsDown, MessageSquare, Send, Clock, CheckCircle2 } from "lucide-react";
@@ -14,22 +14,13 @@ export default function DiscussionsPage() {
   const [prompt, setPrompt] = useState("");
   const [commentInputs, setCommentInputs] = useState<{ [key: string]: string }>({});
   const [successMsg, setSuccessMsg] = useState("");
-  const [currentUser, setCurrentUser] = useState<any>(null);
 
   useEffect(() => {
-    const unsubscribeAuth = auth.onAuthStateChanged((user) => {
-      setCurrentUser(user);
-    });
-
     const q = query(collection(db, "discussions_feed"), orderBy("createdAt", "desc"));
-    const unsubscribeSnapshot = onSnapshot(q, (snapshot) => {
+    const unsubscribe = onSnapshot(q, (snapshot) => {
       setTopics(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
     });
-
-    return () => {
-      unsubscribeAuth();
-      unsubscribeSnapshot();
-    };
+    return () => unsubscribe();
   }, []);
 
   const handlePostTopic = async (e: React.FormEvent) => {
@@ -93,12 +84,9 @@ export default function DiscussionsPage() {
     }
   };
 
-  // Safe cast to satisfy TypeScript for Navbar props
-  const NavbarComponent = Navbar as any;
-
   return (
     <div className="min-h-screen bg-slate-950 flex font-sans text-slate-100">
-      <NavbarComponent user={currentUser} activeTab="discussions" />
+      <Navbar />
 
       <main className="flex-1 p-8 overflow-y-auto max-w-5xl mx-auto space-y-8">
         <div className="flex items-center justify-between">
@@ -110,7 +98,7 @@ export default function DiscussionsPage() {
 
         {successMsg && (
           <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs flex items-center gap-2">
-            <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
+            <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-405" />
             <span>{successMsg}</span>
           </div>
         )}

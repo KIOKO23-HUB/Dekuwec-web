@@ -2,36 +2,25 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { auth, db } from "@/lib/firebase";
+import { db } from "@/lib/mongodb";
 import { collection, onSnapshot, query, orderBy } from "firebase/firestore";
 import Navbar from "@/components/Navbar";
 import { Bell, Calendar } from "lucide-react";
 
 export default function NotificationsPage() {
   const [notifications, setNotifications] = useState<any[]>([]);
-  const [currentUser, setCurrentUser] = useState<any>(null);
 
   useEffect(() => {
-    const unsubscribeAuth = auth.onAuthStateChanged((user) => {
-      setCurrentUser(user);
-    });
-
     const q = query(collection(db, "site_notifications"), orderBy("createdAt", "desc"));
-    const unsubscribeSnapshot = onSnapshot(q, (snapshot) => {
+    const unsubscribe = onSnapshot(q, (snapshot) => {
       setNotifications(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
     });
-
-    return () => {
-      unsubscribeAuth();
-      unsubscribeSnapshot();
-    };
+    return () => unsubscribe();
   }, []);
-
-  const NavbarComponent = Navbar as any;
 
   return (
     <div className="min-h-screen bg-slate-950 flex font-sans text-slate-100">
-      <NavbarComponent user={currentUser} activeTab="notifications" />
+      <Navbar />
 
       <main className="flex-1 p-8 overflow-y-auto max-w-4xl mx-auto space-y-6">
         <div>

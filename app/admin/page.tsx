@@ -3,7 +3,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { db, storage } from "@/lib/firebase";
+import { db, storage } from "@/lib/mongodb";
 import { 
   collection, 
   addDoc, 
